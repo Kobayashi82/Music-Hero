@@ -123,8 +123,12 @@ def test_tap_offset_estimation():
 
     peaks = np.arange(0, 60000, 500.0)
     taps = [int(x + 70 + (i % 3) * 5) for i, x in enumerate(peaks[10:40])]
-    assert estimate_offset(taps, peaks) == pytest.approx(75, abs=5)
-    assert estimate_offset(taps[:5], peaks) == 0  # pocos datos: no se corrige
+    assert estimate_offset(taps, peaks)[0] == pytest.approx(75, abs=5)
+    assert estimate_offset(taps[:5], peaks) == (0, 0.0)  # pocos datos: no se corrige
+    # Retardo mayor que medio intervalo entre acentos (el ataque más cercano sería el siguiente).
+    peaks = np.arange(0, 60000, 400.0)
+    off, score = estimate_offset([int(x + 250) for x in peaks[10:40]], peaks)
+    assert off == pytest.approx(250, abs=5) and score == 1.0
 
 
 def test_taps_drive_the_chart(tmp_path):

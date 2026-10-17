@@ -27,7 +27,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     from .preview import write_preview
     from .rhythm import TempoMap, detect_beats
     from .separate import separate
-    from .taps import accent_peaks, estimate_offset
+    from .taps import fit_offset
     from .taps import load as load_taps
     from .transcribe import transcribe
 
@@ -55,9 +55,9 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     feel = analyze(audio, stems["drums"])
     taps = load_taps(audio, song.audio_sha256)
     if taps:
-        taps.offset_ms = estimate_offset([a for a, _ in taps.taps], accent_peaks(feel))
-        step(f"ritmo marcado a mano: {len(taps.taps)} toques de {taps.path.name}, "
-             f"retardo corregido {taps.offset_ms} ms")
+        fitted = fit_offset(taps, feel)
+        step(f"ritmo marcado a mano: {len(taps.taps)} toques de {taps.path.name}, retardo corregido "
+             f"{taps.offset_ms} ms" + ("" if fitted else " (por defecto: los acentos no lo aclaran)"))
     end_beat = tempo.ms_to_beat(song.duration_ms)
     notes, sections, source = map_expert(trans, tempo, end_beat, feel=feel, taps=taps)
     energy = sum(s.energy for s in sections) / max(1, len(sections))

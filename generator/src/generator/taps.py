@@ -26,7 +26,12 @@ if TYPE_CHECKING:
 
 ROOT = Path(__file__).resolve().parents[3]
 TAPS_DIR = ROOT / "data" / "taps"
-MAX_OFFSET_MS = 150
+# Retardo con el que llegan los toques (salida de audio + reflejos), medido en este equipo con
+# las canciones de acentos claros: Give Up ~210 ms, Queen ~260, Apocalypse ~300.
+DEFAULT_OFFSET_MS = 260
+OFFSET_RANGE_MS = (-100, 500)
+OFFSET_TOL_MS = 40
+MIN_OFFSET_SCORE = 0.4  # por debajo, los acentos no explican los toques (canción suave)
 
 
 @dataclass
@@ -61,19 +66,42 @@ def accent_peaks(feel: Feel, min_accent: float = 0.4) -> np.ndarray:
     return feel.times_ms[1:-1][is_peak]
 
 
-def estimate_offset(tap_starts: list[int], peaks_ms: np.ndarray) -> int:
-    """Mediana de (toque - ataque más cercano). 0 si no hay datos suficientes."""
-    if len(peaks_ms) == 0:
-        return 0
-    diffs = []
-    for t in tap_starts:
-        i = int(np.clip(np.searchsorted(peaks_ms, t), 1, len(peaks_ms) - 1))
-        near = peaks_ms[i - 1] if abs(t - peaks_ms[i - 1]) <= abs(t - peaks_ms[i]) else peaks_ms[i]
-        if abs(t - near) <= MAX_OFFSET_MS:
-            diffs.append(t - near)
-    if len(diffs) < 8:
-        return 0
-    return int(round(float(np.median(diffs))))
+def strong_accents(feel: Feel, covered: list[tuple[int, int]], n: int) -> np.ndarray:
+    """Los n máximos de acento más fuertes dentro de los tramos escuchados."""
+    a, t = feel.mix_accent, feel.times_ms
+    i = np.where((a[1:-1] > a[:-2]) & (a[1:-1] >= a[2:]))[0] + 1
+    i = i[np.array([any(x <= t[k] <= y for x, y in covered) for k in i], bool)]
+    return np.sort(t[i[np.argsort(-a[i])[:n]]])
+
+
+def estimate_offset(tap_starts: list[int], peaks_ms: np.ndarray) -> tuple[int, float]:
+    """Desfase global (toque - audio) que pone más toques sobre un acento, y la fracción que lo
+    hace. Se barre un rango amplio: emparejar cada toque con el ataque más cercano falla en cuanto
+    el retardo pasa de medio intervalo entre acentos (Give Up y Queen daban ~0 con 200-300 ms reales)."""
+    taps = np.asarray(tap_starts, float)
+    peaks = np.sort(np.asarray(peaks_ms, float))
+    if len(taps) < 8 or len(peaks) < 2:
+        return 0, 0.0
+
+    def signed(off: float) -> np.ndarray:
+        x = taps - off
+        i = np.clip(np.searchsorted(peaks, x), 1, len(peaks) - 1)
+        a, b = x - peaks[i - 1], x - peaks[i]
+        return np.where(abs(a) <= abs(b), a, b)
+
+    offs = np.arange(OFFSET_RANGE_MS[0], OFFSET_RANGE_MS[1] + 1, 5)
+    scores = [float((abs(signed(o)) <= OFFSET_TOL_MS).mean()) for o in offs]
+    k = int(np.argmax(scores))
+    d = signed(offs[k])
+    return int(round(offs[k] + np.median(d[abs(d) <= OFFSET_TOL_MS]))), scores[k]
+
+
+def fit_offset(taps: Taps, feel: Feel) -> bool:
+    """Pone taps.offset_ms; False si los acentos no lo aclaran y se usa el retardo por defecto."""
+    starts = [a for a, _ in taps.taps]
+    off, score = estimate_offset(starts, strong_accents(feel, taps.covered, 2 * len(starts)))
+    taps.offset_ms = off if score >= MIN_OFFSET_SCORE else DEFAULT_OFFSET_MS
+    return score >= MIN_OFFSET_SCORE
 
 
 def tap_events(taps: Taps, trans: dict[str, Transcription], section_stem_at, tempo: TempoMap) -> list[Event]:
