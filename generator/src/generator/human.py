@@ -110,9 +110,9 @@ def read_mid(path_or_bytes: Path | bytes) -> dict[str, list[ChartNote]]:
     import mido
 
     if isinstance(path_or_bytes, bytes):
-        mid = mido.MidiFile(file=io.BytesIO(path_or_bytes))
+        mid = mido.MidiFile(file=io.BytesIO(path_or_bytes), clip=True)  # algunos MIDI traen bytes > 127
     else:
-        mid = mido.MidiFile(str(path_or_bytes))
+        mid = mido.MidiFile(str(path_or_bytes), clip=True)
     res = mid.ticks_per_beat
     tempos = []
     for track in mid.tracks[:1]:
