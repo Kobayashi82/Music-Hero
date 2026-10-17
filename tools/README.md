@@ -73,3 +73,14 @@ uv run --project generator python tools/poc_gpu.py "D:/ruta/a/una canción.mp3"
 Sin argumento genera un audio sintético. Deja los 6 stems y `guitar.mid` en `out/poc_gpu/<canción>/`. Escucha `guitar.wav` y abre el `.mid` en cualquier visor MIDI para ver si tiene sentido.
 
 Funciona si: termina con `Demucs en CUDA OK, Basic Pitch en CUDA OK`.
+
+## Pruebas automáticas
+
+Sin tocar nada a mano (útiles para repetir tras un cambio):
+
+```
+uv run --project app python tools/autotest_aimp.py     # controla AIMP: suena unos segundos y lo deja como estaba
+uv run --project app python tools/autotest_input.py    # inyecta teclas en una ventana de prueba propia
+```
+
+`autotest_input.py` toma el foco con su ventana de prueba: la app que lo tuviera (un vídeo a pantalla completa, por ejemplo) puede reaccionar al perderlo.

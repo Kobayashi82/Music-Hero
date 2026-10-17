@@ -53,15 +53,15 @@ Objetivo: quitar las incertidumbres técnicas antes de escribir el proyecto en s
 
 **Terminado cuando:** los cuatro scripts funcionan en tu PC.
 
-Estado (17-10-2026), scripts en `tools/`, cómo probarlos en `tools/README.md`:
+Estado (17-10-2026). Solo falta la guitarra de Wii, scripts en `tools/`, cómo probarlos en `tools/README.md`:
 
 | Prueba | Script | Resultado |
 | --- | --- | --- |
 | Guitarra | `poc_guitar.py` | Pendiente: falta probar con la guitarra de Wii conectada y la ventana sin foco |
-| Teclado | `poc_keyboard.py` | Pendiente: arranca; falta probarlo a mano |
-| AIMP | `poc_aimp.py` | Lee canción, ruta del archivo, estado, posición y duración (probado en pausa). Falta ver cada cuánto avanza la posición sonando |
-| SMTC | `poc_smtc.py` | AIMP no publica en SMTC. Falta probar con YouTube en el navegador |
-| Overlay | `poc_overlay.py` (QPainter) y `poc_overlay_gpu.py` (Qt Quick) | Transparente, click-through y siempre encima comprobados; 60 fps a 3440×1440. Recupera el primer puesto cada 0,5 s (como el Lander). Falta probar el atajo a mano |
+| Teclado | `poc_keyboard.py` | ✅ Probado con `autotest_input.py` (teclas inyectadas): trastes, acordes, strum y sueltas llegan sin foco, y las teclas del juego no llegan a la app con foco; al desactivar vuelven a escribir |
+| AIMP | `poc_aimp.py` | ✅ Probado con `autotest_aimp.py`: la posición se actualiza cada ~32 ms (pasos de 30 ms) y se desvía del reloj entre -28 y +16 ms; seek reflejado en 3 ms, cambio de pista detectado en 12 ms |
+| SMTC | `poc_smtc.py` | AIMP no publica en SMTC. No bloquea la fase 0 (AIMP va por su API); probar con YouTube cuando toque |
+| Overlay | `poc_overlay.py` (QPainter) y `poc_overlay_gpu.py` (Qt Quick) | ✅ Transparente, click-through, no roba el foco y queda encima de un reproductor de vídeo (recupera el primer puesto cada 0,5 s, como el Lander); 60 fps a 3440×1440. Atajo Ctrl+Alt+H probado con `autotest_input.py` |
 | GPU | `poc_gpu.py` | ✅ Queen - Hammer to Fall (3:50): Demucs 3,9 s (59× tiempo real, 0,6 GB de VRAM), Basic Pitch 1 s por CUDA (ONNX). Ojo: solo 171 notas con guitarra distorsionada, a ajustar en la fase 1 |
 
 Notas de instalación: Basic Pitch en Windows con Python 3.12 pediría TensorFlow, así que se usa su modelo ONNX con onnxruntime-gpu; torch se instala con CUDA 13 para compartir DLL con onnxruntime-gpu.
