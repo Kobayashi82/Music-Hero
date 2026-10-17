@@ -20,14 +20,34 @@ uv run --project app python tools/poc_guitar.py
 
 Funciona si: aparecen trastes, strum y palanca, también con el foco en otra app.
 
-## 2. SMTC — `poc_smtc.py`
+**Guitarra de Wii:** la guitarra va enchufada al Wiimote y el Wiimote se empareja por Bluetooth (Configuración → Bluetooth → Agregar dispositivo, con los botones 1+2 pulsados o el botón rojo de sync; si pide PIN, déjalo vacío). El script activa el driver de Wii de SDL; si sale un mando "Nintendo Wii Remote" pero los trastes no responden, prueba con [WiitarThing](https://github.com/Meowmaritus/WiitarThing), que la convierte en un mando de Xbox 360 virtual.
+
+## 1b. Teclado — `poc_keyboard.py`
+
+```
+uv run --project app python tools/poc_keyboard.py
+```
+
+`Ctrl+Alt+H` activa el modo juego: `A S D F G` trastes, flechas arriba/abajo o Intro strum. Abre el Bloc de notas, ponle el foco y toca: aquí deben salir pulsaciones y sueltas, y en el Bloc de notas no debe escribirse nada. Desactiva el modo juego y comprueba que esas teclas vuelven a escribir.
+
+## 2a. AIMP — `poc_aimp.py`
+
+```
+uv run --project app python tools/poc_aimp.py
+```
+
+Pon una canción en AIMP; pausa, salta y cambia de canción. Solo lee, no manda órdenes a AIMP.
+
+Funciona si: salen la canción y la ruta del archivo, y mientras suena `paso` ≈ `reloj` (la posición avanza fina, no a saltos de un segundo).
+
+## 2b. SMTC — `poc_smtc.py` (navegador y otros reproductores)
 
 ```
 uv run --project app python tools/poc_smtc.py          # sesión actual
 uv run --project app python tools/poc_smtc.py --all    # todas
 ```
 
-Pon música en el reproductor que uses de verdad. Prueba: pausa, salta adelante/atrás, cambia de canción.
+Pon un vídeo de YouTube en el navegador (AIMP no sale aquí; para AIMP usa poc_aimp.py). Prueba: pausa, salta adelante/atrás, cambia de canción.
 
 Funciona si: salen título y artista correctos, `interp` avanza suave mientras suena y se para en pausa, y los saltos se reflejan en uno o dos segundos.
 
@@ -40,7 +60,7 @@ uv run --project app python tools/poc_overlay_gpu.py          # Qt Quick (GPU, r
 
 Opciones: `--fullscreen`, `--hotkey f9` (o `ctrl+alt+x`, `pause`...); la de GPU también acepta `--api d3d11|d3d12|opengl|vulkan`.
 
-- `Ctrl+Alt+G` muestra/oculta, `Ctrl+Alt+Q` sale.
+- `Ctrl+Alt+H` muestra/oculta, `Ctrl+Alt+Q` sale.
 - Comprueba: se ve el escritorio detrás, los clics atraviesan, no roba el foco al escribir en otra app, sigue encima al cambiar de ventana, el atajo funciona con el foco en cualquier sitio.
 - La consola imprime fps y % de CPU cada 5 s.
 

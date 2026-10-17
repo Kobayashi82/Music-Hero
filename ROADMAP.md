@@ -14,7 +14,7 @@ Tres piezas independientes:
 2. **Sincronizador**: sabe qué canción suena y en qué milisegundo está.
 3. **Overlay**: ventana transparente, siempre encima, que pinta la autopista y lee el mando.
 
-Prioridad: canciones de tu carpeta local. Las de Spotify/YouTube no tienen archivo, así que van al final (ver Riesgos).
+Prioridad: canciones de tu carpeta local (`D:\Programas\Multimedia\Musicas`) sonando en AIMP. Después el navegador (YouTube) y otros reproductores vía SMTC; las de streaming no tienen archivo, así que van al final (ver Riesgos).
 
 ## Arquitectura y stack
 
@@ -31,10 +31,10 @@ La app nunca transcribe en directo: si la canción no tiene chart, la manda al g
 | Notas | Basic Pitch (Spotify) | Polifónico, ligero, funciona en local |
 | Ritmo | Beat This! (alternativa: madmom) | Beats y compases para cuantizar |
 | Overlay | PySide6 + Qt Quick (GPU, Direct3D 11), ventana transparente, siempre encima, deja pasar clics | Maduro en Windows; medido en fase 0: 2,5 % de CPU frente a 12-18 % con QPainter a 3440×1440. Godot 4 como plan B |
-| Mando | pygame-ce solo para leer el joystick (SDL) | Reconoce las guitarras como mando y funciona sin foco |
-| Posición de la canción | API SMTC de Windows (paquetes `winrt`) | Funciona con cualquier reproductor que salga en el panel multimedia de Windows |
+| Mando | pygame-ce solo para leer el joystick (SDL) + teclado | Vale cualquier mando o guitarra que SDL reconozca, y el teclado. El teclado usa la técnica del Lander: con el juego activo, las teclas del juego se registran con `RegisterHotKey` (no llegan a otras apps) y la suelta se lee con `GetAsyncKeyState` |
+| Posición de la canción | AIMP: su API remota (`AIMP2_RemoteInfo`). Resto: API SMTC de Windows (paquetes `winrt`) | AIMP no sale en SMTC, pero su API da la posición en ms y la ruta del archivo. SMTC cubre el navegador y cualquier reproductor del panel multimedia de Windows |
 | Audio del sistema | PyAudioWPatch (WASAPI loopback) | Para el ajuste fino de sincronía |
-| Atajo global | `RegisterHotKey` de Win32 | Funciona con el overlay sin foco |
+| Atajo global | `RegisterHotKey` de Win32, configurable, por defecto Ctrl+Alt+H | Funciona con el overlay sin foco |
 | Audio propio (fase 3) | sounddevice | Reloj de reproducción preciso |
 
 ## Fases
@@ -45,7 +45,8 @@ Cada fase termina en algo que se puede probar. No se pasa a la siguiente sin cum
 
 Objetivo: quitar las incertidumbres técnicas antes de escribir el proyecto en serio.
 
-- [ ] Guitarra: script que lista mandos con SDL (pygame-ce) e imprime cada botón, el strum y la palanca. Comprobar que se lee **sin que la ventana tenga el foco**.
+- [ ] Guitarra: script que lista mandos con SDL (pygame-ce) e imprime cada botón, el strum y la palanca. Comprobar que se lee **sin que la ventana tenga el foco**. Guitarra de Wii.
+- [ ] Teclado: tocar con el teclado sin foco y sin que las teclas lleguen a la app de debajo.
 - [ ] SMTC: script que imprime título, artista, estado y posición de lo que suena (probar con el reproductor que uses de verdad).
 - [ ] Overlay: ventana transparente, sin bordes, siempre encima y que deja pasar los clics, con un rectángulo moviendo a 60+ fps. Se muestra/oculta con un atajo global.
 - [ ] GPU: Demucs y Basic Pitch funcionando con CUDA en una canción.
@@ -56,10 +57,12 @@ Estado (17-10-2026), scripts en `tools/`, cómo probarlos en `tools/README.md`:
 
 | Prueba | Script | Resultado |
 | --- | --- | --- |
-| Guitarra | `poc_guitar.py` | Pendiente: falta probar con la guitarra conectada y la ventana sin foco |
-| SMTC | `poc_smtc.py` | Pendiente: arranca bien; falta probar con tu reproductor sonando |
-| Overlay | `poc_overlay.py` (QPainter) y `poc_overlay_gpu.py` (Qt Quick) | Transparente, click-through y siempre encima comprobados; 60 fps a 3440×1440. Falta probar el atajo a mano |
-| GPU | `poc_gpu.py` | OK con audio sintético: Demucs 22× tiempo real (0,6 GB de VRAM), Basic Pitch por CUDA (ONNX). Falta una canción real |
+| Guitarra | `poc_guitar.py` | Pendiente: falta probar con la guitarra de Wii conectada y la ventana sin foco |
+| Teclado | `poc_keyboard.py` | Pendiente: arranca; falta probarlo a mano |
+| AIMP | `poc_aimp.py` | Lee canción, ruta del archivo, estado, posición y duración (probado en pausa). Falta ver cada cuánto avanza la posición sonando |
+| SMTC | `poc_smtc.py` | AIMP no publica en SMTC. Falta probar con YouTube en el navegador |
+| Overlay | `poc_overlay.py` (QPainter) y `poc_overlay_gpu.py` (Qt Quick) | Transparente, click-through y siempre encima comprobados; 60 fps a 3440×1440. Recupera el primer puesto cada 0,5 s (como el Lander). Falta probar el atajo a mano |
+| GPU | `poc_gpu.py` | ✅ Queen - Hammer to Fall (3:50): Demucs 3,9 s (59× tiempo real, 0,6 GB de VRAM), Basic Pitch 1 s por CUDA (ONNX). Ojo: solo 171 notas con guitarra distorsionada, a ajustar en la fase 1 |
 
 Notas de instalación: Basic Pitch en Windows con Python 3.12 pediría TensorFlow, así que se usa su modelo ONNX con onnxruntime-gpu; torch se instala con CUDA 13 para compartir DLL con onnxruntime-gpu.
 
@@ -99,7 +102,8 @@ Primero con audio reproducido por la propia app: así la sincronía es exacta y 
 
 ### Fase 4 – Sincronizar con el reproductor externo
 
-- [ ] Leer canción y posición vía SMTC; buscar la chart en la biblioteca por etiquetas (artista/título) y, si falla, por duración + nombre de archivo.
+- [ ] AIMP: canción y posición por su API remota; la chart se busca por la ruta del archivo (hash del audio).
+- [ ] Resto (navegador, otros reproductores): SMTC; buscar la chart por etiquetas (artista/título) y, si falla, por duración + nombre de archivo.
 - [ ] Interpolar la posición entre actualizaciones con el reloj del sistema (SMTC actualiza poco a menudo).
 - [ ] Ajuste fino: capturar el audio del sistema (WASAPI loopback) unos segundos y alinearlo con la canción procesada (correlación de onsets/croma). Repetir cada X segundos para corregir deriva.
 - [ ] Reaccionar a pausa, salto, cambio de canción.
@@ -129,7 +133,7 @@ Primero con audio reproducido por la propia app: así la sincronía es exacta y 
 | Posición de SMTC imprecisa | Se actualiza poco y algunos reproductores la reportan mal | Interpolación + ajuste fino por loopback (fase 4); reproductor propio como alternativa |
 | Retardo del audio (Bluetooth, drivers) | Lo que oyes llega tarde respecto a lo que la app cree | Calibración obligatoria la primera vez |
 | Mando no detectado sin foco | El overlay deja pasar los clics y no tiene foco | Activar eventos de mando en segundo plano en SDL; verificarlo en la fase 0 |
-| Guitarra de Wii | Va conectada al Wiimote por Bluetooth y suele dar más guerra que la de PS3 con dongle USB | Probarla en la fase 0; si no va, usar guitarra de PS3/PS4 o adaptador |
+| Guitarra de Wii | Va conectada al Wiimote por Bluetooth y suele dar más guerra que la de PS3 con dongle USB | Probarla en la fase 0 (SDL lee el Wiimote por HIDAPI); si no va, WiitarThing la expone como mando de Xbox 360, o guitarra de PS3/PS4 |
 | Canciones de Spotify/YouTube | No hay archivo para procesar por delante | Grabar la primera reproducción por loopback (fase 6) |
 | Overlay sobre juegos a pantalla completa | Las ventanas encima no se ven en pantalla completa exclusiva | Fuera de alcance: pensado para escritorio y reproductores de música |
 

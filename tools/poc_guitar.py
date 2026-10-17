@@ -21,6 +21,10 @@ import time
 # Tiene que ir antes de importar pygame: sin esto SDL deja de entregar
 # eventos del mando cuando su ventana pierde el foco.
 os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
+# Wiimote por Bluetooth leído directamente por SDL (driver HIDAPI). Si la
+# guitarra no aparece así, la alternativa es WiitarThing, que la convierte en
+# un mando de Xbox 360 virtual.
+os.environ["SDL_JOYSTICK_HIDAPI_WII"] = "1"
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 
 import pygame  # noqa: E402

@@ -6,7 +6,7 @@ Uso:
     uv run --project app python tools/poc_overlay_gpu.py
     uv run --project app python tools/poc_overlay_gpu.py --api opengl --fullscreen
 
-Atajos: los mismos que poc_overlay.py (Ctrl+Alt+G mostrar/ocultar, Ctrl+Alt+Q salir).
+Atajos: los mismos que poc_overlay.py (Ctrl+Alt+H mostrar/ocultar, Ctrl+Alt+Q salir).
 
 Qué comprobar, además de lo de poc_overlay.py: que el fondo es transparente
 (no negro) con cada --api, y el uso de CPU comparado con la versión QPainter.
@@ -26,7 +26,7 @@ from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 sys.path.insert(0, str(Path(__file__).parent))
 from poc_overlay import (  # noqa: E402
     GWL_EXSTYLE, HOTKEY_QUIT, HOTKEY_TOGGLE, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, HotkeyThread, parse_hotkey, user32,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT, HotkeyThread, bring_to_top, parse_hotkey, user32,
 )
 
 QML = b"""
@@ -107,7 +107,7 @@ APIS = {
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--hotkey", default="ctrl+alt+g")
+    parser.add_argument("--hotkey", default="ctrl+alt+h")
     parser.add_argument("--api", choices=APIS, default="d3d11", help="API gráfica de Qt Quick")
     parser.add_argument("--fullscreen", action="store_true")
     parser.add_argument("--screenshot", type=Path, help="guarda una captura de pantalla a los 3 s (para depurar)")
@@ -185,6 +185,10 @@ def main() -> int:
                 pct = 100 * (cpu - report.last[0]) / (wall - report.last[1])
                 print(f"{root.property('fps'):5.1f} fps  peor frame {root.property('worstMs'):5.1f} ms  CPU {pct:4.1f}%")
             report.last = (cpu, wall)
+
+    topmost = QTimer()
+    topmost.timeout.connect(lambda: view.isVisible() and bring_to_top(int(view.winId())))
+    topmost.start(500)
 
     report.last = None
     timer = QTimer()

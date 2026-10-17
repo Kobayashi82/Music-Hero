@@ -7,7 +7,7 @@ Uso:
     uv run --project app python tools/poc_overlay.py --hotkey f9 --fullscreen
 
 Atajos (globales, funcionan sin foco):
-    Ctrl+Alt+G   mostrar / ocultar  (cámbialo con --hotkey)
+    Ctrl+Alt+H   mostrar / ocultar  (cámbialo con --hotkey)
     Ctrl+Alt+Q   salir              (también Ctrl+C en la consola)
 
 Qué comprobar:
@@ -45,13 +45,27 @@ user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
 user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
 
+HWND_TOPMOST = -1
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOOWNERZORDER = 0x1, 0x2, 0x10, 0x200
+user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+
+
+def bring_to_top(hwnd: int) -> None:
+    """Recupera el primer puesto entre las ventanas «siempre encima» (como el Lander).
+
+    Otras ventanas topmost (subtítulos del reproductor, notificaciones...) pueden
+    quedar por encima; se llama cada medio segundo mientras el overlay se ve.
+    """
+    user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER)
+
+
 HOTKEY_TOGGLE, HOTKEY_QUIT = 1, 2
 LANE_COLORS =["#2ecc40", "#ff4136", "#ffdc00", "#0074d9", "#ff851b"]
 NOTE_TRAVEL_S = 1.6  # segundos que tarda una nota en bajar hasta la línea de golpeo
 
 
 def parse_hotkey(text: str) -> tuple[int, int]:
-    """'ctrl+alt+g' -> (modificadores, código de tecla virtual)."""
+    """'ctrl+alt+h' -> (modificadores, código de tecla virtual)."""
     mods = 0
     vk = None
     for part in text.lower().replace(" ", "").split("+"):
@@ -150,15 +164,20 @@ class Overlay(QWidget):
         self.timer.setInterval(max(1, int(1000 / max(self.refresh_hz, 60))))
         self.timer.timeout.connect(self.update)
 
+        self.topmost_timer = QTimer(self)
+        self.topmost_timer.timeout.connect(lambda: bring_to_top(int(self.winId())))
+
     def showEvent(self, event):
         super().showEvent(event)
         self._force_click_through()
         self.frame_times.clear()
         self.timer.start()
+        self.topmost_timer.start(500)
 
     def hideEvent(self, event):
         super().hideEvent(event)
         self.timer.stop()
+        self.topmost_timer.stop()
 
     def _force_click_through(self) -> None:
         """Qt ya pone estos estilos, pero los forzamos y lo comprobamos."""
@@ -231,7 +250,7 @@ class Overlay(QWidget):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--hotkey", default="ctrl+alt+g", help="atajo para mostrar/ocultar (ej: f9, ctrl+alt+g)")
+    parser.add_argument("--hotkey", default="ctrl+alt+h", help="atajo para mostrar/ocultar (ej: f9, ctrl+alt+h)")
     parser.add_argument("--fullscreen", action="store_true", help="ventana del tamaño de la pantalla (peor caso)")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
