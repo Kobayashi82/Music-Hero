@@ -15,15 +15,21 @@ STEM_ORDER = ["guitar", "piano", "other", "vocals", "bass"]
 
 
 def write_preview(path: Path, song: SongInfo, tempo: TempoMap, notes: list[ChartNote], sections: list[Section],
-                  source: list[SourceNote], generator_version: str, taps=None) -> None:
+                  source: list[SourceNote], generator_version: str, taps=None,
+                  difficulties: dict[str, list[ChartNote]] | None = None) -> None:
+    difficulties = difficulties or {"expert": notes}
+
+    def pack(ns: list[ChartNote]) -> list:
+        return [[n.time_ms, n.frets, n.sustain_ms, int(n.hopo), STEM_ORDER.index(n.stem) if n.stem in STEM_ORDER else 0,
+                 n.pitch] for n in ns]
+
     data = {
         "title": song.title,
         "artist": song.artist,
         "duration": song.duration_ms,
         "version": generator_version,
         "stems": STEM_ORDER,
-        "notes": [[n.time_ms, n.frets, n.sustain_ms, int(n.hopo), STEM_ORDER.index(n.stem) if n.stem in STEM_ORDER else 0,
-                   n.pitch] for n in notes],
+        "diffs": {d: pack(ns) for d, ns in difficulties.items()},
         "src": sorted([[s.start_ms, s.end_ms, s.pitch, round(s.amp, 2), STEM_ORDER.index(s.stem),
                         int(s.origin == "onset")] for s in source if s.stem in STEM_ORDER]),
         "beats": tempo.beats_ms,
@@ -56,6 +62,7 @@ TEMPLATE = r"""<!doctype html>
   .ctrl { display:flex; gap:8px; align-items:center; margin-left:auto; }
   button { background:#2b3040; color:var(--fg); border:1px solid #3a4054; border-radius:6px; padding:5px 10px; cursor:pointer; font:inherit; }
   button.on { background:#3d6df2; border-color:#3d6df2; }
+  select { background:#2b3040; color:var(--fg); border:1px solid #3a4054; border-radius:6px; padding:5px 8px; font:inherit; }
   input[type=range] { width:110px; }
   #time { font-variant-numeric: tabular-nums; min-width:110px; text-align:right; }
   canvas { display:block; width:100vw; }
@@ -68,6 +75,7 @@ TEMPLATE = r"""<!doctype html>
   <h1>__TITLE__</h1>
   <div class="stats" id="stats"></div>
   <div class="ctrl">
+    <select id="diff" title="dificultad"></select>
     <button id="play">▶ Play</button>
     <span id="time">0:00</span>
     <button id="view" title="V">Autopista</button>
@@ -86,8 +94,10 @@ const NAMES = {guitar:"guitarra", piano:"piano", other:"otros", vocals:"voz", ba
 const au = document.getElementById("au"), cv = document.getElementById("cv"), ctx = cv.getContext("2d");
 let view = "timeline", clicks = false, span = 8, lastT = 0, actx = null, seekTo = 0;
 
+const DIFF_NAMES = {expert:"Experto", hard:"Difícil", medium:"Medio", easy:"Fácil"};
+D.notes = D.diffs.expert || Object.values(D.diffs)[0];
 // ---------- estadísticas ----------
-(function stats(){
+function stats(){
   const n = D.notes, dur = D.duration/1000;
   const chords = n.filter(x => x[1].length > 1).length, hopos = n.filter(x => x[3]).length, sus = n.filter(x => x[2] > 0).length;
   let maxNps = 0;
@@ -102,6 +112,12 @@ let view = "timeline", clicks = false, span = 8, lastT = 0, actx = null, seekTo 
   document.getElementById("legend").innerHTML = D.stems.map(s => `<span style="--c:${STEMC[s]}">${NAMES[s]}</span>`).join("")
     + `<span style="--c:#fff">contorno elegido</span>` + (D.taps.length ? `<span style="--c:#fff">ritmo marcado (${D.taps.length} toques)</span>` : "")
     + ` · espacio play · ← → ±5 s · V vista · C clics · clic para saltar`;
+}
+stats();
+(function diffSelect(){
+  const sel = document.getElementById("diff");
+  for (const d of ["expert","hard","medium","easy"]) if (D.diffs[d]) sel.add(new Option(DIFF_NAMES[d], d));
+  sel.onchange = () => { D.notes = D.diffs[sel.value]; stats(); sel.blur(); };
 })();
 
 // ---------- utilidades ----------
@@ -152,6 +168,7 @@ function drawTimeline(W, H, now) {
   const n0 = lowerBound(D.notes, tA - 2000, n => n[0]);
   let first = true;
   for (let i = n0; i < D.notes.length && D.notes[i][0] <= tB + 2000; i++) { const n = D.notes[i];
+    if (!n[5]) continue;  // charts humanas: sin altura
     const y = Y(n[5]) + rowH/2; if (first) { ctx.moveTo(X(n[0]), y); first = false; } else ctx.lineTo(X(n[0]), y); }
   ctx.stroke();
   // ritmo marcado a mano (ya corregido el retardo)

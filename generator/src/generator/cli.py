@@ -3,6 +3,7 @@
 Uso:
     uv run --project generator generate "D:/Musica/Artista - Canción.mp3"
     uv run --project generator generate canción.mp3 --clonehero      # también notes.chart + song.ini
+    uv run --project generator generate canción.mp3 --human chart.sng # chart hecha por personas, sincronizada
 """
 
 import argparse
@@ -16,7 +17,8 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUT = ROOT / "out" / "charts"
 
 
-def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str = "cuda") -> Path:
+def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str = "cuda",
+             human_chart: Path | None = None) -> Path:
     from .audio import song_info
     from .export_chart import chart_json, write_clonehero, write_json
     from .feel import analyze
@@ -60,12 +62,25 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     notes, sections, source = map_expert(trans, tempo, end_beat, feel=feel, taps=taps)
     energy = sum(s.energy for s in sections) / max(1, len(sections))
     step(f"chart Experto: {len(notes)} notas, energía media {energy:.2f}")
+    difficulties = {"expert": notes}
 
-    data = chart_json(song, tempo, {"expert": notes}, sections, __version__)
+    if human_chart is not None:
+        from . import human
+
+        hc = human.load(human_chart)
+        alignment = human.align(hc.audio_files, audio)
+        difficulties = human.shift(hc.difficulties, alignment, tempo)
+        offs = alignment.offsets()
+        step(f"chart humana: {hc.name} ({hc.charter}), sincronizada (anclas afinadas {alignment.confidence:.0%}, "
+             f"desfase {offs.min() / 1000:+.2f}..{offs.max() / 1000:+.2f} s): "
+             + ", ".join(f"{d} {len(n)}" for d, n in difficulties.items()))
+        notes = difficulties.get("expert", notes)
+
+    data = chart_json(song, tempo, difficulties, sections, __version__)
     write_json(out / "chart.json", data)
-    write_preview(out / "preview.html", song, tempo, notes, sections, source, __version__, taps)
+    write_preview(out / "preview.html", song, tempo, notes, sections, source, __version__, taps, difficulties)
     if clonehero:
-        write_clonehero(out / "clonehero", song, tempo, {"expert": notes}, sections)
+        write_clonehero(out / "clonehero", song, tempo, difficulties, sections)
     step(f"listo: {out}")
     return out
 
@@ -76,11 +91,12 @@ def main() -> int:
     parser.add_argument("-o", "--out", type=Path, default=DEFAULT_OUT, help=f"carpeta de salida (por defecto {DEFAULT_OUT})")
     parser.add_argument("--clonehero", action="store_true", help="exporta también notes.chart + song.ini + audio")
     parser.add_argument("--cpu", action="store_true", help="sin GPU")
+    parser.add_argument("--human", type=Path, help="chart hecha por personas (.sng o carpeta) para sincronizar y usar")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
 
     for audio in args.audio:
-        generate(audio, args.out, args.clonehero, "cpu" if args.cpu else "cuda")
+        generate(audio, args.out, args.clonehero, "cpu" if args.cpu else "cuda", args.human)
     return 0
 
 

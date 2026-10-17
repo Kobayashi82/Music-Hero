@@ -19,11 +19,22 @@ def sha256_file(path: Path) -> str:
 
 
 def load_mono(path: Path, sr: int) -> np.ndarray:
-    data, file_sr = sf.read(str(path), dtype="float32", always_2d=True)
+    try:
+        data, file_sr = sf.read(str(path), dtype="float32", always_2d=True)
+    except sf.LibsndfileError:
+        return _ffmpeg_mono(path, sr)  # algunos .opus que libsndfile no entiende
     mono = data.mean(axis=1)
     if file_sr != sr:
         mono = soxr.resample(mono, file_sr, sr)
     return mono
+
+
+def _ffmpeg_mono(path: Path, sr: int) -> np.ndarray:
+    import subprocess
+
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"],
+                         capture_output=True, check=True).stdout
+    return np.frombuffer(raw, dtype=np.float32).copy()
 
 
 def song_info(path: Path) -> SongInfo:
