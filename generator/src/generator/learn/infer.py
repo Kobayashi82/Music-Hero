@@ -14,6 +14,9 @@ from .model import OnsetNet
 from .train import peaks, predict_song
 
 MIN_SUSTAIN_S = 0.2  # sostenidos más cortos que esto son notas normales
+# Con 0,5 el modelo marca un 14 % de fotogramas como sostenidos frente al 36 % de las
+# charts humanas (biblioteca, v1); con 0,25 la proporción es parecida (38 %).
+SUSTAIN_THRESHOLD = 0.25
 
 
 @dataclass
@@ -46,7 +49,7 @@ def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 
         for i, f in enumerate(on):
             nxt = on[i + 1] if i + 1 < len(on) else len(probs)
             end = f + 1
-            while end < nxt - 2 and probs[end, 4 + k] > 0.5:
+            while end < nxt - 2 and probs[end, 4 + k] > SUSTAIN_THRESHOLD:
                 end += 1
             start_ms = int(round(f / FPS * 1000))
             end_ms = int(round(end / FPS * 1000)) if (end - f) / FPS >= MIN_SUSTAIN_S else start_ms + 100

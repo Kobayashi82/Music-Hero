@@ -61,7 +61,9 @@ class Songs:
                 continue
             self.items.append({"stem": lab.stem, "feats": np.load(feats, mmap_mode="r"),
                                "onset": d["onset"], "sustain": d["sustain"], "chord": d["chord"], "meta": meta,
-                               "style": style_of(meta)})
+                               "style": style_of(meta),
+                               # dificultades sin notas = el charter no las hizo, no "aquí no se toca"
+                               "has": d["onset"].sum(axis=1) > 0})
 
     def split(self):
         return [s for s in self.items if not is_val(s["stem"])], [s for s in self.items if is_val(s["stem"])]
@@ -76,9 +78,10 @@ def soften(onset: np.ndarray) -> np.ndarray:
 
 
 def batch(songs: list[dict], size: int, length: int, rng: random.Random):
-    xs, on, su, ch = [], [], [], []
+    xs, on, su, ch, has = [], [], [], [], []
     for _ in range(size):
         s = rng.choice(songs)
+        has.append(s["has"].astype(np.float32))
         t = s["feats"].shape[0]
         a = rng.randint(0, max(0, t - length))
         x = with_style(np.asarray(s["feats"][a:a + length], dtype=np.float32), s["style"])
@@ -88,15 +91,19 @@ def batch(songs: list[dict], size: int, length: int, rng: random.Random):
         su.append(np.pad(s["sustain"][:, a:a + length], ((0, 0), (0, pad))).astype(np.float32))
         ch.append(np.pad(s["chord"][:, a:a + length], ((0, 0), (0, pad))).astype(np.float32))
     to = lambda a: torch.from_numpy(np.stack(a))  # noqa: E731
-    return to(xs), to(on).transpose(1, 2), to(su).transpose(1, 2), to(ch).transpose(1, 2)
+    return (to(xs), to(on).transpose(1, 2), to(su).transpose(1, 2), to(ch).transpose(1, 2),
+            to(has)[:, None, :])
 
 
-def loss_fn(logits, on, su, ch):
+def loss_fn(logits, on, su, ch, has):
+    """has (B, 1, 4): 0 en las dificultades que la chart no tiene, que no cuentan."""
     lo, ls, lc = logits[..., 0:4], logits[..., 4:8], logits[..., 8:12]
-    l_on = F.binary_cross_entropy_with_logits(lo, on, pos_weight=torch.tensor(8.0, device=lo.device))
-    l_su = F.binary_cross_entropy_with_logits(ls, su)
-    mask = (on >= 1).float()  # el acorde solo importa donde hay nota
-    l_ch = (F.binary_cross_entropy_with_logits(lc, ch, reduction="none") * mask).sum() / mask.sum().clamp(min=1)
+    bce = lambda x, y, **kw: F.binary_cross_entropy_with_logits(x, y, reduction="none", **kw)  # noqa: E731
+    frames = (has * torch.ones_like(on)).sum().clamp(min=1)
+    l_on = (bce(lo, on, pos_weight=torch.tensor(8.0, device=lo.device)) * has).sum() / frames
+    l_su = (bce(ls, su) * has).sum() / frames
+    mask = (on >= 1).float() * has  # el acorde solo importa donde hay nota
+    l_ch = (bce(lc, ch) * mask).sum() / mask.sum().clamp(min=1)
     return l_on + 0.5 * l_su + 0.3 * l_ch
 
 
@@ -171,6 +178,8 @@ def evaluate(model, songs, device, thresholds=None) -> dict:
         for th in cands:
             h = p_ = r = 0
             for s, pr in zip(songs, probs):
+                if not s["onset"][k].any():  # dificultad que la chart no tiene
+                    continue
                 ref = np.where(s["onset"][k])[0]
                 a, b, c = f1(peaks(pr[:, k], th), ref)
                 h, p_, r = h + a, p_ + b, r + c
@@ -218,10 +227,10 @@ def main() -> int:
     best_f1, t0, running = -1.0, time.time(), []
     for step in range(1, args.steps + 1):
         model.train()
-        x, on, su, ch = (a.to(device, non_blocking=True) for a in batch(train, args.batch, args.length, rng))
+        x, on, su, ch, has = (a.to(device, non_blocking=True) for a in batch(train, args.batch, args.length, rng))
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             logits = model(x)
-        loss = loss_fn(logits.float(), on, su, ch)
+        loss = loss_fn(logits.float(), on, su, ch, has)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
