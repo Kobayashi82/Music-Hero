@@ -90,10 +90,10 @@ Primera valoración (v0.1): Queen escasa, Sk8er Boi bien, Graceland complicada, 
 
 Segunda valoración (v0.2): **ninguna sirve**. El ritmo que se siente (lo que se tamborilearía en una mesa) no lo dicta un instrumento: en Queen, al principio, es un "ta ta taaaa" por compás y la chart pone muchas notas. Decisión: hacer las dos cosas:
 
-1. **Ritmo marcado a mano** (hecho): `uv run --project app tap` con la canción sonando en AIMP; Espacio = "ta", mantener = "taaaa". Se guarda en `data/taps/<canción>.json` (en el repo: son la referencia de lo que se siente) y `generate` lo usa solo: los toques mandan el cuándo y el cuánto; la transcripción solo da la altura para el botón (la voz si canta justo ahí, si no la pista del tramo). El retardo (audio + reflejos) se estima comparando los toques con los ataques fuertes del audio y se resta. Fuera de los tramos grabados sigue el automático. Prueba: `tools/autotest_tap.py` (inicio y duración con 0-2 ms de error respecto a la posición de AIMP).
-2. **Automático que siga el motivo** (pendiente): la melodía principal (voz o riff) con sus notas largas, en vez de los ataques de los instrumentos; medido contra los ritmos marcados a mano.
+1. **Ritmo marcado a mano** (retirado el 18-10-2026): una grabadora (`tap`, Espacio = "ta", mantener = "taaaa" con AIMP sonando) para que los toques mandasen el cuándo y el cuánto. Se marcó a oído y no es una referencia precisa (además llegaba ~250 ms tarde); la referencia pasó a ser las charts humanas y el modelo propio (OnsetNet), así que se quitaron la grabadora, los toques y su uso en `generate`.
+2. **Automático que siga el motivo** (pendiente): la melodía principal (voz o riff) con sus notas largas, en vez de los ataques de los instrumentos. Sustituido por el modelo propio entrenado con charts humanas.
 
-Lo aprendido con 4 canciones marcadas a mano (`tools/analyze_taps.py`) y charts humanas (`tools/eval_vs_human.py`):
+Lo aprendido con 4 canciones marcadas a mano (herramienta ya retirada) y charts humanas (`tools/eval_vs_human.py`):
 - Con batería, lo marcado coincide sobre todo con los golpes de la batería (F1 0,6-0,8); la voz es de lo que peor encaja. En Queen (cada 2 pulsos, largo-corto) y en canciones lentas de notas largas, ninguna fuente del audio lo explica bien.
 - **Ni la chart oficial de Harmonix coincide mucho con lo marcado a mano** (F1 0,47; la dificultad Difícil tiene la misma densidad y da 0,45): no hay una única respuesta correcta. Pero su intro es justo el "ta ta taaaa" que describió el usuario: **el objetivo es parecerse a las charts humanas**.
 - Modelos públicos entrenados con charts humanas (17-10-2026):

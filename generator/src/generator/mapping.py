@@ -17,7 +17,6 @@ La chart toca la sensación de la canción, no todas sus notas:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -27,7 +26,6 @@ from .rhythm import TempoMap, quantize
 
 if TYPE_CHECKING:  # transcribe carga torch y Basic Pitch; aquí solo hace falta el tipo
     from .feel import Feel
-    from .taps import Taps
     from .transcribe import Transcription
 
 
@@ -131,7 +129,7 @@ def _clean_pitches(pitches: dict[int, float], ratio: float) -> dict[int, float]:
 
 def build_events(
     trans: dict[str, Transcription], sections: list[Section], tempo: TempoMap, p: MapParams,
-    feel: Feel | None = None, taps: Taps | None = None,
+    feel: Feel | None = None,
 ) -> list[Event]:
     grouped: dict[tuple[float, str], Event] = {}
     for sec in sections:
@@ -166,21 +164,6 @@ def build_events(
         if feel is not None and sec.stem:
             picked += _groove_fill(picked, events, sec, trans[sec.stem], tempo, feel, p, measure_starts)
         kept += picked
-
-    if taps is not None:
-        # Donde hay ritmo marcado a mano, manda el ritmo marcado.
-        from .taps import tap_events
-
-        starts = [s.start_beat for s in sections]
-
-        def stem_at(ms: float) -> str:
-            i = int(np.searchsorted(starts, tempo.ms_to_beat(ms), side="right")) - 1
-            return sections[i].stem if i >= 0 else ""
-
-        kept = [e for e in kept if not taps.covers(tempo.beat_to_ms(e.beat))]
-        for e in tap_events(taps, trans, stem_at, tempo):
-            e.pitches = _clean_pitches(e.pitches, p.chord_amp_ratio)
-            kept.append(e)
 
     kept.sort(key=lambda e: e.beat)
     _limit_chords(kept, sections, p)
@@ -390,11 +373,11 @@ def _sustains_and_hopos(notes: list[ChartNote], tempo: TempoMap, p: MapParams) -
 
 def map_expert(
     trans: dict[str, Transcription], tempo: TempoMap, end_beat: float, p: MapParams | None = None,
-    feel: Feel | None = None, taps: Taps | None = None,
+    feel: Feel | None = None,
 ) -> tuple[list[ChartNote], list[Section], list[SourceNote]]:
     p = p or MapParams()
     sections = choose_sections(trans, tempo, end_beat, p)
-    events = build_events(trans, sections, tempo, p, feel, taps)
+    events = build_events(trans, sections, tempo, p, feel)
     notes = assign_frets(events, tempo, p)
     source = [n for t in trans.values() for n in t.notes]
     return notes, sections, source
@@ -405,10 +388,8 @@ def map_from_model(
     model_notes: dict, p: MapParams | None = None,
 ) -> dict[str, list[ChartNote]]:
     """Charts por dificultad a partir de OnsetNet: el modelo decide cuándo, cuánto dura y si es
-    acorde; la transcripción da la altura y los botones salen por contorno, como con los toques.
+    acorde; la transcripción da la altura y los botones salen por contorno.
     Si el modelo predice botones (v4+), se usan los suyos."""
-    from .taps import Taps, tap_events
-
     p = p or MapParams()
     starts = [s.start_beat for s in sections]
 
@@ -418,9 +399,8 @@ def map_from_model(
 
     out = {}
     for diff, notes in model_notes.items():
-        taps = Taps(Path("modelo"), [(n.start_ms, n.end_ms) for n in notes], [(0, 10**9)])
         chord_at = {round(quantize(tempo.ms_to_beat(n.start_ms)), 6): n.chord for n in notes}
-        events = tap_events(taps, trans, stem_at, tempo)
+        events = timed_events([(n.start_ms, n.end_ms) for n in notes], trans, stem_at, tempo)
         if notes and notes[0].frets is not None:
             frets_at = {}
             for n in sorted(notes, key=lambda n: n.strength):  # la más clara manda si dos caen en el mismo pulso
@@ -440,3 +420,34 @@ def map_from_model(
                 e.pitches = {low: e.pitches[low], low + 7: e.pitches[low]}  # acorde de quinta
         out[diff] = assign_frets(events, tempo, p)
     return out
+
+
+def timed_events(spans: list[tuple[int, int]], trans: dict[str, Transcription], section_stem_at,
+                 tempo: TempoMap) -> list[Event]:
+    """Un evento por (inicio, fin) en ms. Altura: la voz si canta justo ahí; si no, la pista del tramo."""
+    events: dict[float, Event] = {}
+    last_pitch = 52
+    for s, e in spans:
+        beat = round(quantize(tempo.ms_to_beat(s)), 6)
+        end_beat = tempo.ms_to_beat(e)
+        pitches = _pitches_at(s, trans.get("vocals"), 120) or _pitches_at(s, trans.get(section_stem_at(s) or "guitar"), 150)
+        if not pitches:
+            pitches = {last_pitch: 0.5}
+        last_pitch = min(pitches)
+        ev = Event(beat, end_beat, pitches, "modelo", strong=True)
+        ev.salience = 1.0
+        if beat not in events or end_beat > events[beat].end_beat:
+            events[beat] = ev
+    return sorted(events.values(), key=lambda e: e.beat)
+
+
+def _pitches_at(t: float, trans: Transcription | None, window_ms: int) -> dict[int, float]:
+    if trans is None:
+        return {}
+    near = [n for n in trans.notes if abs(n.start_ms - t) <= window_ms and n.amp >= 0.3]
+    if not near:
+        near = [n for n in trans.notes if n.start_ms <= t < n.end_ms and n.amp >= 0.3]
+    if not near:
+        return {}
+    best_start = min(near, key=lambda n: abs(n.start_ms - t)).start_ms
+    return {n.pitch: n.amp for n in near if abs(n.start_ms - best_start) <= 40}

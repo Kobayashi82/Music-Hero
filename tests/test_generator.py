@@ -116,41 +116,26 @@ def test_energy_sets_density_and_keeps_strong_beats():
     assert sum(n.beat % 1 == 0 for n in calm) / len(calm) > 0.8  # en lo tranquilo, sobre todo tiempos fuertes
 
 
-# ---------- ritmo marcado a mano ----------
+# ---------- notas del modelo -> chart ----------
 
-def test_tap_offset_estimation():
-    from generator.taps import estimate_offset
-
-    peaks = np.arange(0, 60000, 500.0)
-    taps = [int(x + 70 + (i % 3) * 5) for i, x in enumerate(peaks[10:40])]
-    assert estimate_offset(taps, peaks)[0] == pytest.approx(75, abs=5)
-    assert estimate_offset(taps[:5], peaks) == (0, 0.0)  # pocos datos: no se corrige
-    # Retardo mayor que medio intervalo entre acentos (el ataque más cercano sería el siguiente).
-    peaks = np.arange(0, 60000, 400.0)
-    off, score = estimate_offset([int(x + 250) for x in peaks[10:40]], peaks)
-    assert off == pytest.approx(250, abs=5) and score == 1.0
-
-
-def test_taps_drive_the_chart(tmp_path):
-    from generator.taps import Taps
+def test_model_notes_drive_the_chart():
+    from generator.learn.infer import ModelNote
+    from generator.mapping import map_from_model
 
     t = tempo_120()
     b = t.beat_to_ms
-    # Transcripción con corcheas por todas partes...
     notes = [(b(1 + i * 0.5), b(1.4 + i * 0.5), 40 + (i % 4), 0.8) for i in range(70)]
     trans = {"guitar": fake_transcription("guitar", notes, b(40))}
-    # ...pero el ritmo marcado entre los pulsos 9 y 17 es "ta ta taaaa" por compás (+60 ms de retardo).
-    lag = 60
-    taps_list = []
-    for m in (9, 13):
-        taps_list += [(b(m) + lag, b(m) + 100 + lag), (b(m + 1) + lag, b(m + 1) + 100 + lag),
-                      (b(m + 2) + lag, b(m + 3.5) + lag)]
-    taps = Taps(tmp_path / "x.json", taps_list, [(b(9) - 100, b(17) - 100)], offset_ms=lag)
-    out, _, _ = map_expert(trans, t, t.ms_to_beat(b(40)), MapParams(), taps=taps)
-    inside = [n for n in out if b(9) - 100 <= n.time_ms <= b(17) - 100]
-    assert [n.beat for n in inside] == [9, 10, 11, 13, 14, 15]
-    assert [n.sustain_ms > 0 for n in inside] == [False, False, True] * 2
-    assert any(n.beat < 9 for n in out) and any(n.beat > 17 for n in out)  # fuera, el automático
+    _, sections, _ = map_expert(trans, t, t.ms_to_beat(b(40)), MapParams())
+    # "ta ta taaaa" por compás, con y sin botones del modelo
+    spans = [(b(m), b(m) + 100) for m in (9, 10, 13, 14)] + [(b(m), b(m + 1.5)) for m in (11, 15)]
+    model = [ModelNote(s, e, 0.0, 0.9) for s, e in sorted(spans)]
+    with_frets = [ModelNote(s, e, 0.0, 0.9, [k % 5]) for k, (s, e) in enumerate(sorted(spans))]
+    out = map_from_model(trans, t, sections, {"expert": model, "hard": with_frets})
+    for d in ("expert", "hard"):
+        assert [n.beat for n in out[d]] == [9, 10, 11, 13, 14, 15]
+        assert [n.sustain_ms > 0 for n in out[d]] == [False, False, True] * 2
+    assert [n.frets for n in out["hard"]] == [[k % 5] for k in range(6)]
 
 
 # ---------- exportación ----------
