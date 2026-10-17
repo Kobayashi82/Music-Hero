@@ -104,10 +104,15 @@ def read_chart(text: str) -> dict[str, list[ChartNote]]:
 
 # ---------- notes.mid (Rock Band) ----------
 
-def read_mid(path: Path) -> dict[str, list[ChartNote]]:
+def read_mid(path_or_bytes: Path | bytes) -> dict[str, list[ChartNote]]:
+    import io
+
     import mido
 
-    mid = mido.MidiFile(str(path))
+    if isinstance(path_or_bytes, bytes):
+        mid = mido.MidiFile(file=io.BytesIO(path_or_bytes))
+    else:
+        mid = mido.MidiFile(str(path_or_bytes))
     res = mid.ticks_per_beat
     tempos = []
     for track in mid.tracks[:1]:

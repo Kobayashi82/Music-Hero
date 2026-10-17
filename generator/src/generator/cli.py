@@ -18,7 +18,7 @@ DEFAULT_OUT = ROOT / "out" / "charts"
 
 
 def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str = "cuda",
-             human_chart: Path | None = None) -> Path:
+             human_chart: Path | None = None, model_path: Path | None = None) -> Path:
     from .audio import song_info
     from .export_chart import chart_json, write_clonehero, write_json
     from .feel import analyze
@@ -64,6 +64,14 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     step(f"chart Experto: {len(notes)} notas, energía media {energy:.2f}")
     difficulties = {"expert": notes}
 
+    if model_path is not None and human_chart is None:
+        from .learn.infer import predict
+        from .mapping import map_from_model
+
+        difficulties = map_from_model(trans, tempo, sections, predict(audio, model_path, device))
+        notes = difficulties["expert"]
+        step(f"modelo {model_path.name}: " + ", ".join(f"{d} {len(n)}" for d, n in difficulties.items()))
+
     if human_chart is not None:
         from . import human
 
@@ -92,11 +100,12 @@ def main() -> int:
     parser.add_argument("--clonehero", action="store_true", help="exporta también notes.chart + song.ini + audio")
     parser.add_argument("--cpu", action="store_true", help="sin GPU")
     parser.add_argument("--human", type=Path, help="chart hecha por personas (.sng o carpeta) para sincronizar y usar")
+    parser.add_argument("--model", type=Path, help="modelo entrenado (models/onset.pt) para el ritmo de las 4 dificultades")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
 
     for audio in args.audio:
-        generate(audio, args.out, args.clonehero, "cpu" if args.cpu else "cuda", args.human)
+        generate(audio, args.out, args.clonehero, "cpu" if args.cpu else "cuda", args.human, args.model)
     return 0
 
 

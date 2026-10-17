@@ -17,6 +17,7 @@ La chart toca la sensación de la canción, no todas sus notas:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -397,3 +398,35 @@ def map_expert(
     notes = assign_frets(events, tempo, p)
     source = [n for t in trans.values() for n in t.notes]
     return notes, sections, source
+
+
+def map_from_model(
+    trans: dict[str, Transcription], tempo: TempoMap, sections: list[Section],
+    model_notes: dict, p: MapParams | None = None,
+) -> dict[str, list[ChartNote]]:
+    """Charts por dificultad a partir de OnsetNet: el modelo decide cuándo, cuánto dura y si es
+    acorde; la transcripción da la altura y los botones salen por contorno, como con los toques."""
+    from .taps import Taps, tap_events
+
+    p = p or MapParams()
+    starts = [s.start_beat for s in sections]
+
+    def stem_at(ms: float) -> str:
+        i = int(np.searchsorted(starts, tempo.ms_to_beat(ms), side="right")) - 1
+        return sections[i].stem if i >= 0 else ""
+
+    out = {}
+    for diff, notes in model_notes.items():
+        taps = Taps(Path("modelo"), [(n.start_ms, n.end_ms) for n in notes], [(0, 10**9)])
+        chord_at = {round(quantize(tempo.ms_to_beat(n.start_ms)), 6): n.chord for n in notes}
+        events = tap_events(taps, trans, stem_at, tempo)
+        for e in events:
+            e.pitches = _clean_pitches(e.pitches, p.chord_amp_ratio)
+            prob = chord_at.get(e.beat, 0.0)
+            low = min(e.pitches)
+            if prob < 0.5:
+                e.pitches = {low: e.pitches[low]}
+            elif len(e.pitches) == 1:
+                e.pitches = {low: e.pitches[low], low + 7: e.pitches[low]}  # acorde de quinta
+        out[diff] = assign_frets(events, tempo, p)
+    return out
