@@ -25,10 +25,11 @@ import torch
 import torch.nn.functional as F
 
 from .data import DIFFS, FPS
-from .model import N_MELS, OnsetNet
+from .model import N_COMBOS, N_MELS, OnsetNet, combo_frets
 
 ROOT = Path(__file__).resolve().parents[4]
 TOL_FRAMES = int(round(0.05 * FPS))  # ±50 ms
+FRET_WEIGHT = 0.5
 
 
 def norm(s: str) -> str:
@@ -63,10 +64,32 @@ class Songs:
                                "onset": d["onset"], "sustain": d["sustain"], "chord": d["chord"], "meta": meta,
                                "style": style_of(meta),
                                # dificultades sin notas = el charter no las hizo, no "aquí no se toca"
-                               "has": d["onset"].sum(axis=1) > 0})
+                               "has": d["onset"].sum(axis=1) > 0,
+                               "frets": [fret_labels(d[f"notes_{x}"]) for x in DIFFS]})
 
     def split(self):
         return [s for s in self.items if not is_val(s["stem"])], [s for s in self.items if is_val(s["stem"])]
+
+
+def fret_labels(notes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(fotogramas, combinación de botones) de cada nota; notes = notes_<dif> de data.py."""
+    frames = np.round(notes[:, 0] / 1000 * FPS).astype(np.int64)
+    combos = (notes[:, 2:7] > 0.5).astype(np.int64) @ (1 << np.arange(5))
+    keep = combos > 0  # notas al aire: no hay botón que aprender
+    return frames[keep], combos[keep]
+
+
+def fret_target(frets: list[tuple[np.ndarray, np.ndarray]], a: int, length: int) -> np.ndarray:
+    """(length, 4) con la combinación en el inicio de cada nota y sus vecinos (±1 fotograma), -100 = no cuenta."""
+    out = np.full((length, len(frets)), -100, np.int64)
+    for k, (frames, combos) in enumerate(frets):
+        i, j = np.searchsorted(frames, [a - 1, a + length + 1])
+        f, c = frames[i:j] - a, combos[i:j]
+        for off in (-1, 1, 0):  # el propio inicio, al final, manda sobre el vecino de otra nota
+            g = f + off
+            ok = (g >= 0) & (g < length)
+            out[g[ok], k] = c[ok]
+    return out
 
 
 def soften(onset: np.ndarray) -> np.ndarray:
@@ -78,7 +101,7 @@ def soften(onset: np.ndarray) -> np.ndarray:
 
 
 def batch(songs: list[dict], size: int, length: int, rng: random.Random):
-    xs, on, su, ch, has = [], [], [], [], []
+    xs, on, su, ch, has, fr = [], [], [], [], [], []
     for _ in range(size):
         s = rng.choice(songs)
         has.append(s["has"].astype(np.float32))
@@ -90,13 +113,15 @@ def batch(songs: list[dict], size: int, length: int, rng: random.Random):
         on.append(np.pad(soften(s["onset"][:, a:a + length]), ((0, 0), (0, pad))))
         su.append(np.pad(s["sustain"][:, a:a + length], ((0, 0), (0, pad))).astype(np.float32))
         ch.append(np.pad(s["chord"][:, a:a + length], ((0, 0), (0, pad))).astype(np.float32))
+        fr.append(fret_target(s["frets"], a, length))
     to = lambda a: torch.from_numpy(np.stack(a))  # noqa: E731
     return (to(xs), to(on).transpose(1, 2), to(su).transpose(1, 2), to(ch).transpose(1, 2),
-            to(has)[:, None, :])
+            to(has)[:, None, :], to(fr))
 
 
-def loss_fn(logits, on, su, ch, has):
-    """has (B, 1, 4): 0 en las dificultades que la chart no tiene, que no cuentan."""
+def loss_fn(logits, on, su, ch, has, fr=None):
+    """has (B, 1, 4): 0 en las dificultades que la chart no tiene, que no cuentan.
+    fr (B, T, 4): combinación de botones en los inicios (-100 = no cuenta); solo si el modelo tiene botones."""
     lo, ls, lc = logits[..., 0:4], logits[..., 4:8], logits[..., 8:12]
     bce = lambda x, y, **kw: F.binary_cross_entropy_with_logits(x, y, reduction="none", **kw)  # noqa: E731
     frames = (has * torch.ones_like(on)).sum().clamp(min=1)
@@ -104,7 +129,12 @@ def loss_fn(logits, on, su, ch, has):
     l_su = (bce(ls, su) * has).sum() / frames
     mask = (on >= 1).float() * has  # el acorde solo importa donde hay nota
     l_ch = (bce(lc, ch) * mask).sum() / mask.sum().clamp(min=1)
-    return l_on + 0.5 * l_su + 0.3 * l_ch
+    total = l_on + 0.5 * l_su + 0.3 * l_ch
+    if fr is not None and logits.shape[-1] > 12:
+        lf = logits[..., 12:].reshape(-1, N_COMBOS)
+        if (fr >= 0).any():
+            total = total + FRET_WEIGHT * F.cross_entropy(lf, fr.reshape(-1), ignore_index=-100)
+    return total
 
 
 def peaks(prob: np.ndarray, threshold: float, min_gap: int = 3) -> np.ndarray:
@@ -141,19 +171,26 @@ def f1(pred: np.ndarray, ref: np.ndarray, tol: int = TOL_FRAMES) -> tuple[int, i
 @torch.no_grad()
 def predict_song(model: OnsetNet, feats: np.ndarray, device: str, style: float = 1.0,
                  chunk: int = 4096, overlap: int = 512) -> np.ndarray:
-    """Probabilidades (T, 12) para una canción entera, por trozos solapados."""
+    """Probabilidades (T, 12) para una canción entera, por trozos solapados; con botones, (T, 12 + 4 x 32):
+    detrás, la probabilidad de cada combinación de botones por dificultad (suma 1, la 0 nunca)."""
     model.eval()
     if model.n_extra > feats.shape[1] - N_MELS:
         feats = with_style(np.asarray(feats, dtype=np.float32), style)
     t = len(feats)
-    out = np.zeros((t, 12), np.float32)
+    out = np.zeros((t, model.n_out), np.float32)
     weight = np.zeros(t, np.float32)
     start = 0
     while start < t:
         end = min(start + chunk, t)
         x = torch.from_numpy(np.asarray(feats[start:end], dtype=np.float32)).unsqueeze(0).to(device)
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=device == "cuda"):
-            p = torch.sigmoid(model(x).float())[0].cpu().numpy()
+            logits = model(x).float()[0]
+        p = torch.sigmoid(logits[:, :12])
+        if model.frets:
+            lf = logits[:, 12:].reshape(-1, 4, N_COMBOS)
+            lf[..., 0] = -1e9  # sin botón no existe en el formato
+            p = torch.cat([p, torch.softmax(lf, dim=-1).reshape(len(p), -1)], dim=1)
+        p = p.cpu().numpy()
         w = np.ones(end - start, np.float32)
         if start > 0:
             w[:overlap // 2] = 0.0
@@ -188,7 +225,49 @@ def evaluate(model, songs, device, thresholds=None) -> dict:
             if best is None or score > best[0]:
                 best = (score, prec, rec, th)
         result[d] = {"f1": best[0], "precision": best[1], "recall": best[2], "threshold": best[3]}
+        if model.frets:
+            result[d].update(fret_metrics(songs, probs, k))
     return result
+
+
+def fret_combo_at(prob: np.ndarray, k: int, frame: int) -> int:
+    """Combinación más probable en la dificultad k alrededor de un inicio (±1 fotograma)."""
+    p = prob[max(0, frame - 1):frame + 2, 12 + k * N_COMBOS:12 + (k + 1) * N_COMBOS].sum(axis=0)
+    return int(np.argmax(p))
+
+
+def fret_metrics(songs: list[dict], probs: list[np.ndarray], k: int) -> dict:
+    """Botones sobre los inicios humanos (aísla los botones del ritmo): combinación exacta, dirección
+    entre notas seguidas (sube / baja / igual, por el botón más bajo) y proporción de acordes."""
+    exact = same_dir = n_dir = chords_p = chords_r = n = 0
+    for s, pr in zip(songs, probs):
+        frames, ref = s["frets"][k]
+        if not len(frames):
+            continue
+        pred = np.array([fret_combo_at(pr, k, int(f)) for f in frames])
+        exact += int((pred == ref).sum())
+        low = lambda c: np.array([combo_frets(int(x))[0] for x in c])  # noqa: E731
+        dp, dr = np.sign(np.diff(low(pred))), np.sign(np.diff(low(ref)))
+        same_dir += int((dp == dr).sum())
+        n_dir += len(dr)
+        chords_p += sum(len(combo_frets(int(x))) > 1 for x in pred)
+        chords_r += sum(len(combo_frets(int(x))) > 1 for x in ref)
+        n += len(ref)
+    return {"fret_exact": exact / max(1, n), "fret_dir": same_dir / max(1, n_dir),
+            "chords_pred": chords_p / max(1, n), "chords_ref": chords_r / max(1, n)}
+
+
+def init_from(model: OnsetNet, path: Path) -> None:
+    """Copia los pesos de otro modelo; si este tiene más salidas (botones), las 12 primeras se copian
+    y el resto empieza de cero."""
+    src = torch.load(path, map_location="cpu")["model"]
+    own = model.state_dict()
+    for name, w in src.items():
+        if own[name].shape == w.shape:
+            own[name].copy_(w)
+        else:  # última capa: las salidas nuevas van detrás
+            own[name][:w.shape[0]].copy_(w)
+    print(f"pesos iniciales de {path.name}")
 
 
 def main() -> int:
@@ -200,6 +279,8 @@ def main() -> int:
     ap.add_argument("--length", type=int, default=1536)  # ~18 s
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--eval-every", type=int, default=2000)
+    ap.add_argument("--frets", action="store_true", help="aprender también los botones de cada nota")
+    ap.add_argument("--init", type=Path, help="empezar desde los pesos de otro modelo (p. ej. models/onset_v3.pt)")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
@@ -218,8 +299,10 @@ def main() -> int:
     print(f"{len(train)} canciones de entrenamiento ({sum(s['style'] for s in train):.0f} de Harmonix), "
           f"{len(val)} de validación ({len(exclude)} de la biblioteca excluidas)")
     device = "cuda"
-    model = OnsetNet().to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    model = OnsetNet(frets=args.frets).to(device)
+    if args.init:
+        init_from(model, args.init)
+    opt =torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda s: min(1.0, s / 500) * 0.5 * (1 + math.cos(math.pi * min(1.0, s / args.steps))))
     rng = random.Random(0)
@@ -227,10 +310,10 @@ def main() -> int:
     best_f1, t0, running = -1.0, time.time(), []
     for step in range(1, args.steps + 1):
         model.train()
-        x, on, su, ch, has = (a.to(device, non_blocking=True) for a in batch(train, args.batch, args.length, rng))
+        x, on, su, ch, has, fr = (a.to(device, non_blocking=True) for a in batch(train, args.batch, args.length, rng))
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             logits = model(x)
-        loss = loss_fn(logits.float(), on, su, ch, has)
+        loss = loss_fn(logits.float(), on, su, ch, has, fr)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -242,15 +325,20 @@ def main() -> int:
             running = []
         if step % args.eval_every == 0 or step == args.steps:
             res = evaluate(model, val, device)
-            mean = float(np.mean([r["f1"] for r in res.values()]))
+            # con botones se guarda el que mejor combina ritmo y botones
+            mean = float(np.mean([r["f1"] + r.get("fret_exact", 0.0) for r in res.values()]))
             print("   validación: " + "  ".join(f"{d} F1 {r['f1']:.3f} (p {r['precision']:.2f} r {r['recall']:.2f} "
                                                  f"umbral {r['threshold']})" for d, r in res.items()))
+            if args.frets:
+                print("   botones:    " + "  ".join(
+                    f"{d} exactos {r['fret_exact']:.0%} dirección {r['fret_dir']:.0%} "
+                    f"acordes {r['chords_pred']:.0%}/{r['chords_ref']:.0%}" for d, r in res.items()))
             if mean > best_f1:
                 best_f1 = mean
-                torch.save({"model": model.state_dict(), "n_extra": model.n_extra,
+                torch.save({"model": model.state_dict(), "n_extra": model.n_extra, "frets": model.frets,
                             "thresholds": {d: r["threshold"] for d, r in res.items()},
                             "val": res, "step": step}, args.out)
-                print(f"   guardado (F1 medio {mean:.3f}) -> {args.out}")
+                print(f"   guardado (puntuación {mean:.3f}) -> {args.out}")
     return 0
 
 

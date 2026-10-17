@@ -1,4 +1,4 @@
-"""F1 de inicios de un modelo OnsetNet sobre canciones preparadas que no ha visto.
+"""F1 de inicios (y botones, si el modelo los tiene) de un modelo OnsetNet sobre canciones preparadas que no ha visto.
 
 Uso:
     uv run --project generator python tools/eval_model.py models/onset_v1.pt out/dataset/feat_library [--per-song]
@@ -29,7 +29,9 @@ def main() -> int:
         res = evaluate(model, group, "cuda", thresholds)
         print(f"{name} ({len(group)} canciones):")
         for d, r in res.items():
-            print(f"  {d:<7} F1 {r['f1']:.3f}  (precisión {r['precision']:.2f}, recall {r['recall']:.2f})")
+            frets = (f"   botones: exactos {r['fret_exact']:.0%}, dirección {r['fret_dir']:.0%}, "
+                     f"acordes {r['chords_pred']:.0%} (humanas {r['chords_ref']:.0%})") if "fret_exact" in r else ""
+            print(f"  {d:<7} F1 {r['f1']:.3f}  (precisión {r['precision']:.2f}, recall {r['recall']:.2f}){frets}")
     if "--per-song" not in sys.argv:
         return 0
     print("\nExperto por canción (notas del modelo / humanas):")

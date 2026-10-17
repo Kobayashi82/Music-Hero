@@ -405,7 +405,8 @@ def map_from_model(
     model_notes: dict, p: MapParams | None = None,
 ) -> dict[str, list[ChartNote]]:
     """Charts por dificultad a partir de OnsetNet: el modelo decide cuándo, cuánto dura y si es
-    acorde; la transcripción da la altura y los botones salen por contorno, como con los toques."""
+    acorde; la transcripción da la altura y los botones salen por contorno, como con los toques.
+    Si el modelo predice botones (v4+), se usan los suyos."""
     from .taps import Taps, tap_events
 
     p = p or MapParams()
@@ -420,6 +421,15 @@ def map_from_model(
         taps = Taps(Path("modelo"), [(n.start_ms, n.end_ms) for n in notes], [(0, 10**9)])
         chord_at = {round(quantize(tempo.ms_to_beat(n.start_ms)), 6): n.chord for n in notes}
         events = tap_events(taps, trans, stem_at, tempo)
+        if notes and notes[0].frets is not None:
+            frets_at = {}
+            for n in sorted(notes, key=lambda n: n.strength):  # la más clara manda si dos caen en el mismo pulso
+                frets_at[round(quantize(tempo.ms_to_beat(n.start_ms)), 6)] = n.frets
+            chart = [ChartNote(tempo.beat_to_ms(e.beat), frets_at[e.beat], beat=e.beat, end_beat=e.end_beat,
+                               pitch=int(min(e.pitches)), stem=e.stem) for e in events]
+            _sustains_and_hopos(chart, tempo, p)
+            out[diff] = chart
+            continue
         for e in events:
             e.pitches = _clean_pitches(e.pitches, p.chord_amp_ratio)
             prob = chord_at.get(e.beat, 0.0)

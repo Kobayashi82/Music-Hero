@@ -175,3 +175,46 @@ def test_exports_agree(tmp_path):
     bpm = int(re.search(r"= B (\d+)", txt.split("[SyncTrack]")[1]).group(1)) / 1000
     for tick, n in zip(ticks, data["difficulties"]["expert"]["notes"]):
         assert tick / RESOLUTION * 60000 / bpm == pytest.approx(n["time_ms"], abs=1)
+
+
+# ---------- modelo propio (OnsetNet), sin GPU ----------
+
+def test_fret_labels_and_targets():
+    from generator.learn.model import combo, combo_frets
+    from generator.learn.train import fret_labels, fret_target
+
+    assert combo([0, 2]) == 5 and combo_frets(5) == [0, 2]
+    # tiempo ms, duración, 5 botones: verde suelta, rojo+amarillo, nota al aire (se descarta)
+    notes = np.array([[1000, 0, 1, 0, 0, 0, 0], [1100, 0, 0, 1, 1, 0, 0], [2000, 0, 0, 0, 0, 0, 0]], np.float32)
+    frames, combos = fret_labels(notes)
+    assert list(combos) == [1, 6] and len(frames) == 2
+    empty = (np.zeros(0, np.int64), np.zeros(0, np.int64))
+    t = fret_target([(frames, combos), empty, empty, empty], a=80, length=40)
+    f0, f1 = frames - 80
+    assert t[f0, 0] == 1 and t[f1, 0] == 6 and t[f1 + 1, 0] == 6 and t[f0 - 1, 0] == 1
+    assert (t[:, 1:] == -100).all() and (t[f1 + 2:, 0] == -100).all()
+
+
+def test_onsetnet_with_frets_shapes_and_init(tmp_path):
+    import torch
+
+    from generator.learn.model import N_COMBOS, OnsetNet
+    from generator.learn.train import init_from, loss_fn, predict_song
+
+    old = OnsetNet(hidden=16, layers=1)
+    torch.save({"model": old.state_dict()}, tmp_path / "old.pt")
+    new = OnsetNet(hidden=16, layers=1, frets=True)
+    init_from(new, tmp_path / "old.pt")
+    w_old, w_new = old.head[1].weight, new.head[1].weight
+    assert w_new.shape[0] == 12 + 4 * N_COMBOS and torch.equal(w_new[:12], w_old)
+
+    x = torch.randn(2, 64, 83)
+    logits = new(x)
+    z = torch.zeros(2, 64, 4)
+    fr = torch.full((2, 64, 4), -100, dtype=torch.long)
+    fr[0, 10, 0] = 5
+    assert loss_fn(logits, z, z, z, torch.ones(2, 1, 4), fr) > loss_fn(logits, z, z, z, torch.ones(2, 1, 4))
+
+    probs = predict_song(new, np.random.randn(100, 82).astype(np.float32), "cpu", chunk=64, overlap=16)
+    combos = probs[:, 12:].reshape(100, 4, N_COMBOS)
+    assert np.allclose(combos.sum(-1), 1, atol=1e-4) and combos[..., 0].max() < 1e-6
