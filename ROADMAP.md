@@ -79,16 +79,22 @@ Notas de instalación: Basic Pitch en Windows con Python 3.12 pediría TensorFlo
 
 Estado (17-10-2026): implementado; **falta tu valoración** de las vistas previas (`out/charts/<canción>/preview.html`).
 
-| Canción | Estilo | Notas | nps | Acordes | HOPO | Desfase con el ataque real (mediana / p90) |
+Primera valoración (v0.1): Queen escasa, Sk8er Boi bien, Graceland complicada, Apocalypse con demasiadas notas. En general: **la chart tiene que tocar la sensación de la canción, no todas sus notas**. La v0.2 cambia el enfoque:
+
+| Canción | Estilo | Energía | nps v0.1 → v0.2 | Acordes | Sustains | Desfase con el ataque (mediana / p90) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Queen – Hammer to Fall | rock | 589 | 2,6 | 3 % | 1 % | 12 / 34 ms |
-| Avril Lavigne – Sk8er Boi | pop punk | 1048 | 5,0 | 30 % | 7 % | 9 / 25 ms |
-| Paul Simon – Graceland | pop, guitarra limpia | 1436 | 4,8 | 30 % | 13 % | 5 / 18 ms |
-| Cigarettes After Sex – Apocalypse | lento, ambiental | 1284 | 4,4 | 30 % | 22 % | 6 / 21 ms |
+| Queen – Hammer to Fall | rock | 0,82 | 2,6 → 3,4 | 3 % | 0 % | 12 / 39 ms |
+| Avril Lavigne – Sk8er Boi | pop punk | 0,80 | 5,0 → 4,5 | 22 % | 1 % | 10 / 27 ms |
+| Paul Simon – Graceland | pop, guitarra limpia | 0,80 | 4,8 → 3,7 | 22 % | 2 % | 5 / 17 ms |
+| Cigarettes After Sex – Apocalypse | lento, ambiental | 0,23 | 4,4 → 1,6 | 12 % | 24 % | 6 / 20 ms |
 
 Cómo funciona (`generator/src/generator/`), lo que no es obvio leyendo el código:
-- Basic Pitch se deja muchas notas con guitarra distorsionada, así que el ritmo se completa con un detector de ataques propio, normalizado por ventanas de 6 s (con la normalización global de librosa un estribillo fuerte esconde los versos). La altura de esos ataques sale de las activaciones del modelo, o repite la nota anterior si no está clara.
-- Semicorcheas solo entre notas claras de Basic Pitch; si no, como mucho corcheas. Acordes como mucho el 30 %.
+- **Energía por compás** (`feel.py`): sobre todo lo presente que está la batería respecto a la mezcla (mediana por tramo: unos -26 dB en una balada, -10..-12 dB en rock/punk/pop), y algo del volumen del tramo dentro de la canción.
+- **Presupuesto**: de 0,75 notas por pulso (energía 0) a 2,25 (energía 1). Semicorcheas solo con energía ≥ 0,75 y entre notas claras de Basic Pitch.
+- **Qué notas entran**: las que más se sienten: tiempo fuerte (inicio de compás > pulso > corchea > semicorchea), acento del conjunto y de la batería, fuerza y duración de la nota.
+- **Relleno de groove**: si un tramo enérgico se queda corto de notas transcritas (guitarra distorsionada, palm mute) y la guitarra suena, se añaden notas en tiempos y corcheas con acento claro, repitiendo la nota que suena.
+- **Simplificar**: acordes del 8 % (tranquila) al 25 % (enérgica), en los golpes más acentuados; de 3 botones solo con energía ≥ 0,8; notas a menos de media corchea se mueven como mucho 1 botón.
+- Basic Pitch se deja muchas notas con guitarra distorsionada: el ritmo se completa con un detector de ataques normalizado por ventanas de 6 s (con la normalización global de librosa un estribillo fuerte esconde los versos) y un mínimo global (si no, la reverb da ataques falsos).
 - Botón = orden de la altura dentro de una ventana de ±8 pulsos (3 alturas distintas → 3 botones seguidos), corregido por el contorno: el paso crece con el intervalo (1 botón hasta 4 semitonos, 2 hasta 9, 3 más). La misma altura en la misma frase repite botón.
 - HOPO con el mismo umbral que Clone Hero/YARG (65/192 de pulso), así el `.chart` no necesita forzar casi ninguno.
 - Pulsos sin detectar (intros) se rellenan con el tempo de alrededor; un 2/4 detectado se trata como 4/4.

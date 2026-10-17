@@ -90,7 +90,8 @@ def test_map_expert_contour_chords_hopos_sustains():
         (b(8), b(10), 40, 0.8), (b(8), b(10), 47, 0.8),  # acorde largo -> sustain
     ]
     trans = {"guitar": fake_transcription("guitar", notes, b(20))}
-    out, sections, _ = map_expert(trans, t, t.ms_to_beat(b(20)), MapParams())
+    # Tramo enérgico: caben semicorcheas.
+    out, sections, _ = map_expert(trans, t, t.ms_to_beat(b(20)), MapParams(default_energy=0.9))
     frets = [n.frets for n in out]
     singles = [f[0] for f in frets[:4]]
     assert singles == sorted(singles) and len(set(singles)) == 4
@@ -99,6 +100,20 @@ def test_map_expert_contour_chords_hopos_sustains():
     assert len(out[6].frets) == 2 and out[6].sustain_ms >= 900
     with_notes = [s for s in sections if any(s.start_beat <= n.beat < s.end_beat for n in out)]
     assert with_notes and all(s.stem == "guitar" for s in with_notes)
+
+
+def test_energy_sets_density_and_keeps_strong_beats():
+    t = tempo_120()
+    b = t.beat_to_ms
+    # Corcheas durante 8 compases, con la nota del tiempo fuerte más fuerte.
+    notes = [(b(1 + i * 0.5), b(1.4 + i * 0.5), 40 + (i % 3), 0.9 if i % 2 == 0 else 0.5) for i in range(64)]
+    trans = {"guitar": fake_transcription("guitar", notes, b(40))}
+    end = t.ms_to_beat(b(40))
+    calm, _, _ = map_expert(trans, t, end, MapParams(default_energy=0.0))
+    loud, _, _ = map_expert(trans, t, end, MapParams(default_energy=1.0))
+    assert len(calm) < len(loud) <= 64
+    assert len(calm) <= 0.75 * 32 + 4  # ~0,75 notas por pulso
+    assert sum(n.beat % 1 == 0 for n in calm) / len(calm) > 0.8  # en lo tranquilo, sobre todo tiempos fuertes
 
 
 # ---------- exportación ----------

@@ -1,12 +1,17 @@
 """Notas transcritas -> chart de 5 botones (Experto).
 
+La chart toca la sensación de la canción, no todas sus notas:
+
 1. Por compás se elige la pista de la que salen las notas: la guitarra si suena;
    si no, piano, "other", voz o bajo, la que más actividad tenga.
 2. Los ataques se cuantizan a la rejilla y se agrupan en eventos (nota o acorde).
-3. Se limita la densidad (separación mínima entre eventos).
+3. Cada compás tiene un presupuesto de notas según su energía (feel.py) y se
+   quedan los eventos que más se sienten: tiempos fuertes, acentos del conjunto
+   y de la batería, notas fuertes y largas.
 4. Botón por contorno relativo: sube -> derecha, baja -> izquierda, repite -> igual,
    normalizado en una ventana deslizante para no quedarse pegado en un extremo.
-5. Acordes -> 2-3 botones; notas largas -> sustain; notas rápidas -> HOPO.
+5. Acordes (pocos, en los acentos) -> 2-3 botones; notas largas -> sustain;
+   notas rápidas -> HOPO.
 """
 
 from __future__ import annotations
@@ -20,15 +25,29 @@ from .model import MELODIC_STEMS, ChartNote, Section, SourceNote
 from .rhythm import TempoMap, quantize
 
 if TYPE_CHECKING:  # transcribe carga torch y Basic Pitch; aquí solo hace falta el tipo
+    from .feel import Feel
     from .transcribe import Transcription
 
 
 @dataclass
 class MapParams:
-    min_gap_beats: float = 0.25  # semicorcheas, solo entre notas claras de Basic Pitch
-    min_gap_weak_beats: float = 0.5  # corcheas si alguna de las dos es dudosa o un ataque sin nota
+    # Presupuesto: notas por pulso según la energía del compás (0 -> min, 1 -> max).
+    notes_per_beat_min: float = 0.75
+    notes_per_beat_max: float = 2.25
+    default_energy: float = 0.7  # sin análisis de energía (tests)
+    min_gap_beats: float = 0.25  # semicorcheas: solo en tramos enérgicos y entre notas claras
+    min_gap_weak_beats: float = 0.5  # corcheas en el resto
+    fast_energy: float = 0.75  # energía a partir de la cual se permiten semicorcheas
     strong_amp: float = 0.45  # amplitud a partir de la cual una nota de Basic Pitch es "clara"
-    max_chord_ratio: float = 0.3  # como mucho este porcentaje de acordes
+    chord_ratio_min: float = 0.08  # porcentaje de acordes en una canción tranquila...
+    chord_ratio_max: float = 0.25  # ...y en una enérgica
+    triad_energy: float = 0.8  # acordes de 3 botones solo con esta energía
+    fast_step_beats: float = 0.5  # notas más juntas que esto se mueven como mucho 1 botón
+    # Relleno de groove (tramos enérgicos con pocas notas transcritas)
+    fill_energy: float = 0.6  # solo con al menos esta energía
+    fill_below: float = 0.7  # si las notas elegidas no llegan a esta fracción del presupuesto
+    fill_accent: float = 0.35  # acento mínimo (batería o conjunto) para poner una nota
+    fill_max_hold_beats: float = 4  # repetir una nota como mucho hasta este número de pulsos después
     min_gap_ms: int = 70
     min_amp: float = 0.2
     chord_amp_ratio: float = 0.7  # una nota cuenta para el acorde si es al menos así de fuerte
@@ -52,6 +71,7 @@ class Event:
     pitches: dict[int, float]  # altura -> amplitud
     stem: str
     strong: bool = False  # alguna nota clara de Basic Pitch (no solo un ataque)
+    salience: float = 0.0  # cuánto se siente al escuchar (decide qué notas entran)
 
     @property
     def amp(self) -> float:
@@ -108,7 +128,8 @@ def _clean_pitches(pitches: dict[int, float], ratio: float) -> dict[int, float]:
 
 
 def build_events(
-    trans: dict[str, Transcription], sections: list[Section], tempo: TempoMap, p: MapParams
+    trans: dict[str, Transcription], sections: list[Section], tempo: TempoMap, p: MapParams,
+    feel: Feel | None = None,
 ) -> list[Event]:
     grouped: dict[tuple[float, str], Event] = {}
     for sec in sections:
@@ -130,33 +151,127 @@ def build_events(
                 ev.strong = ev.strong or strong
 
     events = sorted(grouped.values(), key=lambda e: e.beat)
+    measure_starts = {round(sec.start_beat, 6) for sec in sections}
     for e in events:
         e.pitches = _clean_pitches(e.pitches, p.chord_amp_ratio)
+        e.salience = _salience(e, tempo, feel, measure_starts)
 
-    # Densidad: si dos eventos quedan demasiado juntos, se queda el más fuerte.
     kept: list[Event] = []
-    for e in events:
-        if kept:
-            last = kept[-1]
-            min_gap = p.min_gap_beats if (e.strong and last.strong) else p.min_gap_weak_beats
-            too_close = (e.beat - last.beat < min_gap - 1e-6) or (
-                tempo.beat_to_ms(e.beat) - tempo.beat_to_ms(last.beat) < p.min_gap_ms
-            )
-            if too_close:
-                if e.amp > last.amp:
-                    kept[-1] = e
-                continue
-        kept.append(e)
+    for sec in sections:
+        a_ms, b_ms = tempo.beat_to_ms(sec.start_beat), tempo.beat_to_ms(sec.end_beat)
+        sec.energy = feel.energy(a_ms, b_ms) if feel is not None else p.default_energy
+        picked = _pick(events, sec, tempo, p)
+        if feel is not None and sec.stem:
+            picked += _groove_fill(picked, events, sec, trans[sec.stem], tempo, feel, p, measure_starts)
+        kept += picked
+    kept.sort(key=lambda e: e.beat)
+    _limit_chords(kept, sections, p)
+    return kept
 
-    # Tope de acordes: se quedan los que tienen la segunda voz más fuerte; el resto, nota grave.
-    chords = [e for e in kept if len(e.pitches) >= 2]
-    limit = int(p.max_chord_ratio * len(kept))
-    if len(chords) > limit:
-        chords.sort(key=lambda e: sorted(e.pitches.values())[-2], reverse=True)
-        for e in chords[limit:]:
+
+def _salience(e: Event, tempo: TempoMap, feel: Feel | None, measure_starts: set[float]) -> float:
+    """Cuánto se siente un evento: tiempo fuerte, acento del conjunto y la batería, fuerza y duración."""
+    frac = e.beat % 1
+    if frac < 1e-3:
+        metric = 1.0 if round(e.beat, 6) in measure_starts else 0.9
+    elif abs(frac - 0.5) < 1e-3:
+        metric = 0.65
+    elif abs(frac - 1 / 3) < 1e-3 or abs(frac - 2 / 3) < 1e-3:
+        metric = 0.45
+    else:
+        metric = 0.35
+    mix, drum = feel.accent(tempo.beat_to_ms(e.beat)) if feel is not None else (0.5, 0.5)
+    dur = min(e.end_beat - e.beat, 2) / 2
+    return 0.3 * metric + 0.25 * mix + 0.15 * drum + 0.2 * min(e.amp, 1) + 0.1 * dur
+
+
+def _budget(sec: Section, p: MapParams) -> int:
+    per_beat = p.notes_per_beat_min + (p.notes_per_beat_max - p.notes_per_beat_min) * sec.energy
+    return max(1, int(round(per_beat * (sec.end_beat - sec.start_beat))))
+
+
+def _groove_fill(picked: list[Event], events: list[Event], sec: Section, trans: Transcription,
+                 tempo: TempoMap, feel: Feel, p: MapParams, measure_starts: set[float]) -> list[Event]:
+    """Tramo enérgico con pocas notas transcritas (guitarra rítmica distorsionada, palm mute):
+    se rellena en tiempos y corcheas con un acento claro de batería o del conjunto, mientras
+    la pista suena, repitiendo la nota que esté sonando. Así la chart sigue el groove."""
+    budget = _budget(sec, p)
+    if sec.energy < p.fill_energy or len(picked) >= p.fill_below * budget:
+        return []
+    taken = sorted(e.beat for e in picked)
+    slots = []
+    b = np.ceil(sec.start_beat * 2) / 2
+    while b < sec.end_beat - 1e-6:
+        t = tempo.beat_to_ms(b)
+        f = int(np.searchsorted(trans.frame_times_ms, t))
+        sounding = f < len(trans.rms_db) and trans.rms_db[f] > trans.active_db
+        mix, drum = feel.accent(t)
+        if sounding and max(mix, drum) >= p.fill_accent and all(abs(b - q) >= p.min_gap_weak_beats - 1e-6 for q in taken):
+            slots.append((b, mix, drum))
+        b += 0.5
+    # Nota que suena: la del último evento antes del hueco (o el siguiente si no hay anterior).
+    source = sorted(events, key=lambda e: e.beat)
+    beats = [e.beat for e in source]
+    fills = []
+    for b, mix, drum in slots:
+        i = int(np.searchsorted(beats, b)) - 1
+        ref = source[i] if i >= 0 else (source[0] if source else None)
+        if ref is None or abs(ref.beat - b) > p.fill_max_hold_beats:
+            continue
+        low = min(ref.pitches)
+        e = Event(b, b + 0.25, {low: 0.3}, sec.stem)
+        e.salience = _salience(e, tempo, feel, measure_starts)
+        fills.append(e)
+    fills.sort(key=lambda e: e.salience, reverse=True)
+    out: list[Event] = []
+    for e in fills:
+        if len(picked) + len(out) >= budget:
+            break
+        if all(abs(e.beat - q.beat) >= p.min_gap_weak_beats - 1e-6 for q in out):
+            out.append(e)
+    return out
+
+
+def _pick(events: list[Event], sec: Section, tempo: TempoMap, p: MapParams) -> list[Event]:
+    """Los eventos del compás que más se sienten, hasta su presupuesto y sin amontonarse."""
+    cands = [e for e in events if sec.start_beat <= e.beat < sec.end_beat]
+    budget = _budget(sec, p)
+    fast = sec.energy >= p.fast_energy
+    picked: list[Event] = []
+    for e in sorted(cands, key=lambda e: e.salience, reverse=True):
+        if len(picked) >= budget:
+            break
+        too_close = False
+        for q in picked:
+            gap = p.min_gap_beats if (fast and e.strong and q.strong) else p.min_gap_weak_beats
+            gap_ms = abs(tempo.beat_to_ms(e.beat) - tempo.beat_to_ms(q.beat))
+            if abs(e.beat - q.beat) < gap - 1e-6 or gap_ms < p.min_gap_ms:
+                too_close = True
+                break
+        if not too_close:
+            picked.append(e)
+    return picked
+
+
+def _limit_chords(events: list[Event], sections: list[Section], p: MapParams) -> None:
+    """Pocos acordes y en los golpes que más se sienten; de 3 botones solo en tramos muy enérgicos."""
+    starts = np.array([s.start_beat for s in sections])
+
+    def energy_at(beat: float) -> float:
+        i = int(np.searchsorted(starts, beat, side="right")) - 1
+        return sections[i].energy if i >= 0 else p.default_energy
+
+    song_energy = float(np.mean([s.energy for s in sections])) if sections else p.default_energy
+    ratio = p.chord_ratio_min + (p.chord_ratio_max - p.chord_ratio_min) * song_energy
+    chords = [e for e in events if len(e.pitches) >= 2]
+    chords.sort(key=lambda e: e.salience * sorted(e.pitches.values())[-2], reverse=True)
+    limit = int(ratio * len(events))
+    for i, e in enumerate(chords):
+        if i >= limit:
             low = min(e.pitches)
             e.pitches = {low: e.pitches[low]}
-    return kept
+        elif len(e.pitches) > 2 and energy_at(e.beat) < p.triad_energy:
+            e.pitches = {k: e.pitches[k] for k in sorted(e.pitches)[:2]}
 
 
 def assign_frets(events: list[Event], tempo: TempoMap, p: MapParams) -> list[ChartNote]:
@@ -181,7 +296,8 @@ def assign_frets(events: list[Event], tempo: TempoMap, p: MapParams) -> list[Cha
             elif seen is not None and e.beat - seen[1] <= p.window_beats and np.sign(seen[0] - prev_fret) == np.sign(d):
                 fret = seen[0]  # misma altura que hace poco: mismo botón (los riffs se repiten igual)
             else:
-                fret = _contour_step(prev_fret, d, target)
+                max_size = 1 if e.beat - prev_beat < p.fast_step_beats else 3
+                fret = _contour_step(prev_fret, d, target, max_size)
 
         pitches = sorted(e.pitches)
         if len(pitches) >= 2:
@@ -202,7 +318,7 @@ def assign_frets(events: list[Event], tempo: TempoMap, p: MapParams) -> list[Cha
     return notes
 
 
-def _contour_step(prev_fret: int, d: float, target: int) -> int:
+def _contour_step(prev_fret: int, d: float, target: int, max_size: int = 3) -> int:
     """Siguiente botón respetando la dirección del intervalo.
 
     El paso ideal crece con el intervalo (1 botón hasta 4 semitonos, 2 hasta 9,
@@ -211,7 +327,7 @@ def _contour_step(prev_fret: int, d: float, target: int) -> int:
     hacia los extremos.
     """
     direction = 1 if d > 0 else -1
-    size = 1 if abs(d) <= 4 else 2 if abs(d) <= 9 else 3
+    size = min(max_size, 1 if abs(d) <= 4 else 2 if abs(d) <= 9 else 3)
     options = range(prev_fret + 1, 5) if direction > 0 else range(0, prev_fret)
     if not options:  # ya en el extremo: mejor el objetivo que repetir botón con otra altura
         return target if target != prev_fret else max(0, min(4, prev_fret - direction))
@@ -255,11 +371,12 @@ def _sustains_and_hopos(notes: list[ChartNote], tempo: TempoMap, p: MapParams) -
 
 
 def map_expert(
-    trans: dict[str, Transcription], tempo: TempoMap, end_beat: float, p: MapParams | None = None
+    trans: dict[str, Transcription], tempo: TempoMap, end_beat: float, p: MapParams | None = None,
+    feel: Feel | None = None,
 ) -> tuple[list[ChartNote], list[Section], list[SourceNote]]:
     p = p or MapParams()
     sections = choose_sections(trans, tempo, end_beat, p)
-    events = build_events(trans, sections, tempo, p)
+    events = build_events(trans, sections, tempo, p, feel)
     notes = assign_frets(events, tempo, p)
     source = [n for t in trans.values() for n in t.notes]
     return notes, sections, source

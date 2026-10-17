@@ -19,6 +19,7 @@ DEFAULT_OUT = ROOT / "out" / "charts"
 def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str = "cuda") -> Path:
     from .audio import song_info
     from .export_chart import chart_json, write_clonehero, write_json
+    from .feel import analyze
     from .mapping import map_expert
     from .model import MELODIC_STEMS
     from .preview import write_preview
@@ -47,9 +48,11 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     trans = {s: transcribe(stems[s], s) for s in MELODIC_STEMS}
     step("notas: " + ", ".join(f"{s} {len(t.notes)}" for s, t in trans.items()))
 
+    feel = analyze(audio, stems["drums"])
     end_beat = tempo.ms_to_beat(song.duration_ms)
-    notes, sections, source = map_expert(trans, tempo, end_beat)
-    step(f"chart Experto: {len(notes)} notas")
+    notes, sections, source = map_expert(trans, tempo, end_beat, feel=feel)
+    energy = sum(s.energy for s in sections) / max(1, len(sections))
+    step(f"chart Experto: {len(notes)} notas, energía media {energy:.2f}")
 
     data = chart_json(song, tempo, {"expert": notes}, sections, __version__)
     write_json(out / "chart.json", data)

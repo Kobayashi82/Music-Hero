@@ -50,3 +50,4 @@ class Section:
     end_beat: float
     stem: str
     scores: dict[str, float] = field(default_factory=dict)
+    energy: float = 0.0  # 0 tranquilo .. 1 enérgico (decide cuántas notas caben)

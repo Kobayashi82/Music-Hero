@@ -29,7 +29,8 @@ def write_preview(path: Path, song: SongInfo, tempo: TempoMap, notes: list[Chart
         "beats": tempo.beats_ms,
         "downbeats": tempo.downbeats_ms,
         "sections": [[tempo.beat_to_ms(s.start_beat), tempo.beat_to_ms(s.end_beat),
-                      STEM_ORDER.index(s.stem) if s.stem in STEM_ORDER else -1] for s in sections],
+                      STEM_ORDER.index(s.stem) if s.stem in STEM_ORDER else -1, round(s.energy, 2)]
+                     for s in sections],
     }
     html = (TEMPLATE.replace("__TITLE__", f"{song.artist} - {song.title}".replace("<", ""))
             .replace("__AUDIO__", Path(song.audio_path).resolve().as_uri())
@@ -94,8 +95,9 @@ let view = "timeline", clicks = false, span = 8, lastT = 0, actx = null, seekTo 
   const tot = Object.values(by).reduce((a,b)=>a+b, 0) || 1;
   const src = Object.entries(by).sort((a,b)=>b[1]-a[1]).map(([k,v]) => `${NAMES[k]} ${Math.round(100*v/tot)}%`).join(", ");
   const pct = x => Math.round(100*x/Math.max(1,n.length)) + "%";
+  const energy = D.sections.reduce((a, s) => a + s[3], 0) / Math.max(1, D.sections.length);
   document.getElementById("stats").innerHTML =
-    `<b>${n.length}</b> notas · <b>${(n.length/dur).toFixed(1)}</b> nps (máx ${maxNps}) · acordes <b>${pct(chords)}</b> · HOPO <b>${pct(hopos)}</b> · sustains <b>${pct(sus)}</b> · fuente: ${src} · v${D.version}`;
+    `<b>${n.length}</b> notas · <b>${(n.length/dur).toFixed(1)}</b> nps (máx ${maxNps}) · acordes <b>${pct(chords)}</b> · HOPO <b>${pct(hopos)}</b> · sustains <b>${pct(sus)}</b> · energía <b>${energy.toFixed(2)}</b> · fuente: ${src} · v${D.version}`;
   document.getElementById("legend").innerHTML = D.stems.map(s => `<span style="--c:${STEMC[s]}">${NAMES[s]}</span>`).join("")
     + `<span style="--c:#fff">contorno elegido</span> · espacio play · ← → ±5 s · V vista · C clics · clic para saltar`;
 })();
@@ -115,10 +117,12 @@ function click() {
 function drawTimeline(W, H, now) {
   const px = W / (span*1000), x0 = W * 0.25, X = t => x0 + (t - now) * px;
   const tA = now - x0/px, tB = now + (W - x0)/px;
-  const rollH = H * 0.55, laneTop = rollH + 28, laneH = (H - laneTop - 30) / 5;
+  const rollH = H * 0.55, laneTop = rollH + 30, laneH = (H - laneTop - 30) / 5;
   // tramos por pista
+  // tramos por pista; la altura de la barra es la energía del compás
   for (const s of D.sections) { if (s[1] < tA || s[0] > tB || s[2] < 0) continue;
-    ctx.fillStyle = STEMC[D.stems[s[2]]] + "40"; ctx.fillRect(X(s[0]), rollH + 6, X(s[1]) - X(s[0]), 14); }
+    const h = 4 + 18 * s[3];
+    ctx.fillStyle = STEMC[D.stems[s[2]]] + "70"; ctx.fillRect(X(s[0]) + 1, rollH + 26 - h, X(s[1]) - X(s[0]) - 2, h); }
   // pulsos
   const db = new Set(D.downbeats);
   for (let i = lowerBound(D.beats, tA, x => x); i < D.beats.length && D.beats[i] <= tB; i++) {
