@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Salidas y datos locales
+out/
+library/
+*.wav
+*.mp3
+*.flac
+*.ogg

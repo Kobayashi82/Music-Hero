@@ -1,0 +1,17 @@
+# Music Hero
+App para Windows 11: overlay transparente tipo Guitar Hero sobre el escritorio,
+sincronizado con la canción que suena, para guitarra de plástico (PS3/Wii).
+Ver ROADMAP.md para fases y criterios de terminado.
+
+## Reglas
+- Python 3.12, uv, un entorno en generator/ y otro en app/.
+- El formato de chart está en shared/chart_schema.json; cualquier cambio, versión nueva.
+- Tiempos siempre en milisegundos (int) desde el inicio del audio.
+- Nada de dependencias en app/ que arrastren torch o tensorflow.
+- Cada fase acaba con su criterio de terminado comprobado; no adelantar fases.
+- Probar en Windows real: overlay, SMTC y mando no se pueden simular.
+- Git: push siempre a `main` (https://github.com/Kobayashi82/Music-Hero).
+
+## Comandos
+- Scripts de la app / fase 0: `uv run --project app python tools/<script>.py`
+- Scripts del generador: `uv run --project generator python tools/<script>.py`

@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "music-hero/chart/v1",
+  "title": "Music Hero chart v1",
+  "description": "Chart generada para una canción. Todos los tiempos en milisegundos (int) desde el inicio del audio. Cualquier cambio incompatible sube schema_version.",
+  "type": "object",
+  "required": ["schema_version", "song", "generator", "tempo", "beats", "difficulties"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+
+    "song": {
+      "type": "object",
+      "required": ["title", "artist", "duration_ms", "audio_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "audio_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash del audio original; clave de la caché y del emparejamiento con lo que suena." },
+        "audio_file": { "type": "string", "description": "Ruta del audio relativa a la biblioteca, solo informativa." }
+      }
+    },
+
+    "generator": {
+      "type": "object",
+      "required": ["version", "created"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string", "description": "Versión del algoritmo; si cambia, la caché regenera la chart." },
+        "created": { "type": "string", "format": "date-time" },
+        "source_stem": { "enum": ["guitar", "bass", "piano", "vocals", "other", "mix"], "description": "Pista principal usada para las notas." }
+      }
+    },
+
+    "tempo": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Cambios de tempo y compás, ordenados por tiempo. El primero en time_ms 0.",
+      "items": {
+        "type": "object",
+        "required": ["time_ms", "bpm"],
+        "additionalProperties": false,
+        "properties": {
+          "time_ms": { "type": "integer", "minimum": 0 },
+          "bpm": { "type": "number", "exclusiveMinimum": 0 },
+          "time_signature": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 2, "maxItems": 2, "description": "[numerador, denominador], ej. [4, 4]." }
+        }
+      }
+    },
+
+    "beats": {
+      "type": "array",
+      "description": "Pulsos detectados, ordenados. Sirven para las líneas de la autopista y la cuantización.",
+      "items": {
+        "type": "object",
+        "required": ["time_ms"],
+        "additionalProperties": false,
+        "properties": {
+          "time_ms": { "type": "integer", "minimum": 0 },
+          "downbeat": { "type": "boolean", "default": false, "description": "Primer pulso del compás." }
+        }
+      }
+    },
+
+    "difficulties": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "expert": { "$ref": "#/$defs/track" },
+        "hard": { "$ref": "#/$defs/track" },
+        "medium": { "$ref": "#/$defs/track" },
+        "easy": { "$ref": "#/$defs/track" }
+      }
+    }
+  },
+
+  "$defs": {
+    "track": {
+      "type": "object",
+      "required": ["notes"],
+      "additionalProperties": false,
+      "properties": {
+        "notes": {
+          "type": "array",
+          "description": "Ordenadas por time_ms; como mucho una nota (o acorde) por time_ms.",
+          "items": { "$ref": "#/$defs/note" }
+        }
+      }
+    },
+    "note": {
+      "type": "object",
+      "required": ["time_ms", "frets"],
+      "additionalProperties": false,
+      "properties": {
+        "time_ms": { "type": "integer", "minimum": 0 },
+        "frets": {
+          "type": "array",
+          "description": "Botones: 0 verde, 1 rojo, 2 amarillo, 3 azul, 4 naranja. Varios = acorde. Ordenados y sin repetir.",
+          "items": { "type": "integer", "minimum": 0, "maximum": 4 },
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true
+        },
+        "sustain_ms": { "type": "integer", "minimum": 0, "default": 0 },
+        "hopo": { "type": "boolean", "default": false, "description": "Se puede tocar sin strum si la nota anterior fue acierto." }
+      }
+    }
+  }
+}
