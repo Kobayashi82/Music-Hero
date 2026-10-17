@@ -8,7 +8,9 @@ Por canción se guardan <md5>.feats.npy (se lee a trozos con mmap) y <md5>.npz:
     notes_<dif>     (N, 7) float32: tiempo ms, duración ms, 5 botones (0/1), para etapas posteriores
 
 Uso:
-    uv run --project generator python -m generator.learn.data out/dataset/sng out/dataset/feat
+    uv run --project generator python -m generator.learn.data out/dataset/sng out/dataset/feat [--follow] [--shard 0/4]
+
+--shard k/n reparte el trabajo entre n procesos (cada uno hace los paquetes con md5 % n == k).
 """
 
 from __future__ import annotations
@@ -166,16 +168,20 @@ def main() -> int:
     src, out = Path(sys.argv[1]), Path(sys.argv[2])
     out.mkdir(parents=True, exist_ok=True)
     follow = "--follow" in sys.argv  # seguir procesando lo que vaya llegando de la descarga
+    k, n = 0, 1
+    if "--shard" in sys.argv:
+        k, n = map(int, sys.argv[sys.argv.index("--shard") + 1].split("/"))
+    mine = lambda p: int(p.stem, 16) % n == k if len(p.stem) == 32 else k == 0  # noqa: E731
     failed: set[str] = set()
     t0, done = time.time(), 0
     while True:
         pending = [p for p in sorted(src.glob("*.sng"))
-                   if not (out / f"{p.stem}.npz").exists() and p.stem not in failed]
+                   if mine(p) and not (out / f"{p.stem}.npz").exists() and p.stem not in failed]
         if not pending:
             if not follow:
                 break
             time.sleep(30)
-            if (src / "DONE").exists() and not [p for p in src.glob("*.sng") if not (out / f"{p.stem}.npz").exists()
+            if (src / "DONE").exists() and not [p for p in src.glob("*.sng") if mine(p) and not (out / f"{p.stem}.npz").exists()
                                                  and p.stem not in failed]:
                 break
             continue

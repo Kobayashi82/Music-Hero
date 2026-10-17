@@ -4,6 +4,7 @@ Uso:
     uv run --project generator python tools/encore_dataset.py catalog      # elige qué charts bajar
     uv run --project generator python tools/encore_dataset.py download     # baja los .sng (reanudable)
     uv run --project generator python tools/encore_dataset.py library      # busca las canciones de la biblioteca
+    uv run --project generator python tools/encore_dataset.py library-download  # (re)baja sus charts a out/encore/
 
 Salidas:
     out/dataset/catalog.json        charts elegidas para entrenar (metadatos de Encore)
@@ -32,6 +33,7 @@ LIBRARY_JSON = ROOT / "data" / "encore_library.json"
 MUSIC_DIR = Path("D:/Programas/Multimedia/Musicas")
 API = "https://api.enchor.us"
 FILES = "https://files.enchor.us"
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MusicHero/0.1"}  # Cloudflare rechaza "Python-urllib"
 BUDGET_BYTES = 60 * 1024**3  # tope de descarga (el usuario permite hasta 100 GB en total)
 
 # Cupos por consulta: (campo, valor, máximo de charts)
@@ -53,7 +55,7 @@ def norm(s: str) -> str:
 def post(path: str, body: dict, retries: int = 5) -> dict:
     for attempt in range(retries):
         try:
-            req = urllib.request.Request(f"{API}{path}", method="POST", headers={"Content-Type": "application/json"},
+            req = urllib.request.Request(f"{API}{path}", method="POST", headers={**HEADERS, "Content-Type": "application/json"},
                                          data=json.dumps(body).encode())
             return json.load(urllib.request.urlopen(req, timeout=30))
         except (urllib.error.URLError, TimeoutError) as e:
@@ -117,7 +119,7 @@ def cmd_catalog() -> None:
 def download(md5: str, dest: Path, novideo: bool) -> int:
     url = f"{FILES}/{md5}{'_novideo' if novideo else ''}.sng"
     tmp = dest.with_suffix(".part")
-    with urllib.request.urlopen(url, timeout=60) as resp, open(tmp, "wb") as f:
+    with urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=60) as resp, open(tmp, "wb") as f:
         size = 0
         while chunk := resp.read(1 << 20):
             f.write(chunk)
@@ -144,7 +146,7 @@ def cmd_download(items: list[dict] | None = None, dest_dir: Path = SNG_DIR) -> N
             done += 1
         except Exception as e:  # noqa: BLE001 - un paquete roto no para la descarga
             failed += 1
-            print(f"   fallo {c['artist']} - {c['name']}: {e}")
+            print(f"   fallo {c.get('artist')} - {c.get('name', c.get('title'))}: {e}")
             time.sleep(3)
             continue
         if done % 25 == 0:
@@ -195,4 +197,10 @@ def cmd_library() -> None:
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
-    {"catalog": cmd_catalog, "download": cmd_download, "library": cmd_library}[sys.argv[1]]()
+    commands = {
+        "catalog": cmd_catalog,
+        "download": cmd_download,
+        "library": cmd_library,
+        "library-download": lambda: cmd_download(json.loads(LIBRARY_JSON.read_text(encoding="utf-8")), ROOT / "out" / "encore"),
+    }
+    commands[sys.argv[1]]()
