@@ -302,12 +302,13 @@ def main() -> int:
     model = OnsetNet(frets=args.frets).to(device)
     if args.init:
         init_from(model, args.init)
-    opt =torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda s: min(1.0, s / 500) * 0.5 * (1 + math.cos(math.pi * min(1.0, s / args.steps))))
     rng = random.Random(0)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     best_f1, t0, running = -1.0, time.time(), []
+    skipped = in_a_row = 0
     for step in range(1, args.steps + 1):
         model.train()
         x, on, su, ch, has, fr = (a.to(device, non_blocking=True) for a in batch(train, args.batch, args.length, rng))
@@ -315,13 +316,27 @@ def main() -> int:
             logits = model(x)
         loss = loss_fn(logits.float(), on, su, ch, has, fr)
         opt.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step()
+        ok = bool(torch.isfinite(loss))
+        if ok:
+            loss.backward()
+            ok = bool(torch.isfinite(torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)))
+        # Un lote con NaN (bf16) estropearía todos los pesos (v3 murió así en el paso ~9500): se salta.
+        if ok:
+            opt.step()
+            running.append(loss.item())
+            in_a_row = 0
+        else:
+            opt.zero_grad(set_to_none=True)
+            skipped += 1
+            in_a_row += 1
+            if in_a_row >= 50:
+                print(f"paso {step}: 50 lotes seguidos con NaN, se para (el mejor modelo ya está en {args.out})")
+                return 1
         sched.step()
-        running.append(loss.item())
         if step % 200 == 0:
-            print(f"paso {step}: pérdida {np.mean(running):.4f} ({(time.time() - t0) / step:.2f} s/paso)")
+            extra = f", {skipped} lotes saltados por NaN" if skipped else ""
+            print(f"paso {step}: pérdida {np.mean(running) if running else float('nan'):.4f} "
+                  f"({(time.time() - t0) / step:.2f} s/paso{extra})")
             running = []
         if step % args.eval_every == 0 or step == args.steps:
             res = evaluate(model, val, device)
