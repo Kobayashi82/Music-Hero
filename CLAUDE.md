@@ -17,5 +17,6 @@ Ver ROADMAP.md para fases y criterios de terminado.
 - Scripts del generador: `uv run --project generator python tools/<script>.py`
 - Generar una chart: `uv run --project generator generate "<canción.mp3>" [--clonehero]` → `out/charts/<canción>/` (chart.json, preview.html, stems/, clonehero/)
 - Marcar el ritmo a mano: `uv run --project app tap` (AIMP sonando; Espacio = ta, mantener = taaaa) → `data/taps/<canción>.json`, que `generate` usa solo
+- Usar una chart humana (Chorus Encore .sng o carpeta): `uv run --project generator generate "<canción.mp3>" --human <chart.sng>`
 - Tests (sin GPU): `uv run --project generator --with pytest --with jsonschema pytest tests`
 - Música del usuario: `D:\Programas\Multimedia\Musicas` (reproductor: AIMP)

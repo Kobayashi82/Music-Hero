@@ -93,6 +93,16 @@ Segunda valoración (v0.2): **ninguna sirve**. El ritmo que se siente (lo que se
 1. **Ritmo marcado a mano** (hecho): `uv run --project app tap` con la canción sonando en AIMP; Espacio = "ta", mantener = "taaaa". Se guarda en `data/taps/<canción>.json` (en el repo: son la referencia de lo que se siente) y `generate` lo usa solo: los toques mandan el cuándo y el cuánto; la transcripción solo da la altura para el botón (la voz si canta justo ahí, si no la pista del tramo). El retardo (audio + reflejos) se estima comparando los toques con los ataques fuertes del audio y se resta. Fuera de los tramos grabados sigue el automático. Prueba: `tools/autotest_tap.py` (inicio y duración con 0-2 ms de error respecto a la posición de AIMP).
 2. **Automático que siga el motivo** (pendiente): la melodía principal (voz o riff) con sus notas largas, en vez de los ataques de los instrumentos; medido contra los ritmos marcados a mano.
 
+Lo aprendido con 4 canciones marcadas a mano (`tools/analyze_taps.py`) y charts humanas (`tools/eval_vs_human.py`):
+- Con batería, lo marcado coincide sobre todo con los golpes de la batería (F1 0,6-0,8); la voz es de lo que peor encaja. En Queen (cada 2 pulsos, largo-corto) y en canciones lentas de notas largas, ninguna fuente del audio lo explica bien.
+- **Ni la chart oficial de Harmonix coincide mucho con lo marcado a mano** (F1 0,47; la dificultad Difícil tiene la misma densidad y da 0,45): no hay una única respuesta correcta. Pero su intro es justo el "ta ta taaaa" que describió el usuario: **el objetivo es parecerse a las charts humanas**.
+- Modelos públicos entrenados con charts humanas (17-10-2026):
+  - **Tab Hero** (MIT, ~6000 charts): funciona con la pista de guitarra separada y generando por trozos (su generación en streaming no avanza el tiempo). Contra Harmonix (Queen, Experto) da F1 0,39; nuestro generador v0.2, 0,62. En Give Up, contra lo marcado a mano, 0,48-0,54 (v0.2: 0,56). No mejora lo nuestro.
+  - **CloneCharter** (MIT, 42 600 charts): solo pesos, sin código publicado.
+  - **Fretformer / Autochart** (CC BY-NC-SA): piezas ONNX sin el código de la aplicación que las decodifica.
+  - **chartgen.org**: mismo enfoque que nuestro v0.1 (Demucs + Basic Pitch).
+- **Charts humanas de Chorus Encore**: ~30 % de una muestra de 30 canciones de la biblioteca tiene una (muchas de Harmonix). `generate canción.mp3 --human chart.sng` la sincroniza con el audio propio aunque sea otra versión (Queen: el MP3 va un 3,6 % más lento; 92 % de anclas afinadas). La búsqueda (`api.enchor.us`) funciona; las descargas (`files.enchor.us`, Cloudflare) a veces están bloqueadas desde España y hay que usar VPN.
+
 Cómo funciona (`generator/src/generator/`), lo que no es obvio leyendo el código:
 - **Energía por compás** (`feel.py`): sobre todo lo presente que está la batería respecto a la mezcla (mediana por tramo: unos -26 dB en una balada, -10..-12 dB en rock/punk/pop), y algo del volumen del tramo dentro de la canción.
 - **Presupuesto**: de 0,75 notas por pulso (energía 0) a 2,25 (energía 1). Semicorcheas solo con energía ≥ 0,75 y entre notas claras de Basic Pitch.
