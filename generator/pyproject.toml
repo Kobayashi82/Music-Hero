@@ -5,11 +5,14 @@ description = "Generador offline de charts: audio -> notas para 5 botones"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "torch>=2.6",
+    "torchaudio",
     "demucs>=4.1",
     "basic-pitch>=0.4",
     # Basic Pitch en Windows + Python 3.12 pediría TensorFlow (sin GPU en Windows
     # nativo); usamos su modelo ONNX con onnxruntime-gpu.
     "onnxruntime-gpu>=1.20",
+    "beat-this>=1.1",
+    "mutagen>=1.47",
     "soundfile>=0.12",
     "numpy",
 ]
@@ -21,12 +24,16 @@ override-dependencies = ["tensorflow; sys_platform == 'never'"]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu130" }
+torchaudio = { index = "pytorch-cu130" }
 
 [[tool.uv.index]]
 # CUDA 13.x: la misma versión que onnxruntime-gpu, así comparten DLLs.
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
+
+[project.scripts]
+generate = "generator.cli:main"
 
 [build-system]
 requires = ["hatchling"]

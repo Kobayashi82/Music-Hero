@@ -68,14 +68,30 @@ Notas de instalación: Basic Pitch en Windows con Python 3.12 pediría TensorFlo
 
 ### Fase 1 – Generador mínimo (Experto)
 
-- [ ] CLI `generate song.mp3` → separación (Demucs `htdemucs_6s`) → notas (Basic Pitch) → beats y tempo (Beat This! o madmom) → cuantización a la rejilla.
-- [ ] Mapeo a 5 botones por contorno relativo: sube → derecha, baja → izquierda, repite → igual. Ventana deslizante para no quedarse pegado en un extremo.
-- [ ] Acordes → combinaciones de 2-3 botones; notas largas → sustains; notas ligadas rápidas → HOPO.
-- [ ] Si no hay guitarra en un tramo, seguir el bajo, el teclado o la voz.
-- [ ] Salida: `chart.json` propio + exportador a `.chart` para probarlo en Moonscraper o YARG.
-- [ ] Vista previa en HTML (piano roll + botones) para depurar sin jugar.
+- [x] CLI `generate song.mp3` → separación (Demucs `htdemucs_6s`) → notas (Basic Pitch) → beats y tempo (Beat This!) → cuantización a la rejilla.
+- [x] Mapeo a 5 botones por contorno relativo: sube → derecha, baja → izquierda, repite → igual. Ventana deslizante para no quedarse pegado en un extremo.
+- [x] Acordes → combinaciones de 2-3 botones; notas largas → sustains; notas ligadas rápidas → HOPO.
+- [x] Si no hay guitarra en un tramo, seguir el bajo, el teclado o la voz.
+- [x] Salida: `chart.json` propio + exportador a `.chart` para probarlo en Moonscraper o YARG.
+- [x] Vista previa en HTML (piano roll + botones) para depurar sin jugar.
 
 **Terminado cuando:** 3 canciones de estilos distintos dan una chart que "se siente" como la canción al verla en la vista previa.
+
+Estado (17-10-2026): implementado; **falta tu valoración** de las vistas previas (`out/charts/<canción>/preview.html`).
+
+| Canción | Estilo | Notas | nps | Acordes | HOPO | Desfase con el ataque real (mediana / p90) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Queen – Hammer to Fall | rock | 589 | 2,6 | 3 % | 1 % | 12 / 34 ms |
+| Avril Lavigne – Sk8er Boi | pop punk | 1048 | 5,0 | 30 % | 7 % | 9 / 25 ms |
+| Paul Simon – Graceland | pop, guitarra limpia | 1436 | 4,8 | 30 % | 13 % | 5 / 18 ms |
+| Cigarettes After Sex – Apocalypse | lento, ambiental | 1284 | 4,4 | 30 % | 22 % | 6 / 21 ms |
+
+Cómo funciona (`generator/src/generator/`), lo que no es obvio leyendo el código:
+- Basic Pitch se deja muchas notas con guitarra distorsionada, así que el ritmo se completa con un detector de ataques propio, normalizado por ventanas de 6 s (con la normalización global de librosa un estribillo fuerte esconde los versos). La altura de esos ataques sale de las activaciones del modelo, o repite la nota anterior si no está clara.
+- Semicorcheas solo entre notas claras de Basic Pitch; si no, como mucho corcheas. Acordes como mucho el 30 %.
+- Botón = orden de la altura dentro de una ventana de ±8 pulsos (3 alturas distintas → 3 botones seguidos), corregido por el contorno: el paso crece con el intervalo (1 botón hasta 4 semitonos, 2 hasta 9, 3 más). La misma altura en la misma frase repite botón.
+- HOPO con el mismo umbral que Clone Hero/YARG (65/192 de pulso), así el `.chart` no necesita forzar casi ninguno.
+- Pulsos sin detectar (intros) se rellenan con el tempo de alrededor; un 2/4 detectado se trata como 4/4.
 
 ### Fase 2 – Dificultades y lote
 
