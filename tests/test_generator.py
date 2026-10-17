@@ -242,6 +242,13 @@ def test_batch_finds_audio_and_cache(tmp_path):
     model.write_bytes(b"2")
     assert generator_version(model, None) != v1
     assert generator_version(model, None, {"easy": 3.0}) != generator_version(model, None)
+    import soundfile as sf
+
+    from generator.cli import too_long
+
+    for name, secs in (("corta.wav", 2), ("larga.wav", 7)):
+        sf.write(tmp_path / name, np.zeros(8000 * secs, np.float32), 8000)
+    assert too_long([tmp_path / "corta.wav", tmp_path / "larga.wav"], 5 / 60) == [tmp_path / "larga.wav"]
     assert parse_max_nps("expert=14, easy=3.5") == {"expert": 14.0, "easy": 3.5}
     with pytest.raises(ValueError):
         parse_max_nps("facil=3")

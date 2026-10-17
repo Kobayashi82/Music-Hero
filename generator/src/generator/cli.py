@@ -4,6 +4,7 @@ Uso:
     uv run --project generator generate "D:/Musica/Artista - Canción.mp3"
     uv run --project generator generate "D:/Musica/Artista"            # toda la carpeta (y subcarpetas)
     uv run --project generator generate carpeta/ --jobs 2              # dos canciones a la vez
+    uv run --project generator generate carpeta/ --max-minutes 30      # sin las de más de 30 min
     uv run --project generator generate canción.mp3 --clonehero      # también notes.chart + song.ini
     uv run --project generator generate canción.mp3 --human chart.sng # chart hecha por personas, sincronizada
 
@@ -45,6 +46,20 @@ def find_audio(paths: list[str]) -> list[Path]:
             out += sorted(f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in AUDIO_EXT)
         else:
             out.append(p)
+    return out
+
+
+def too_long(files: list[Path], max_minutes: float) -> list[Path]:
+    """Las que duran más de max_minutes (lee solo la cabecera)."""
+    import soundfile as sf
+
+    out = []
+    for f in files:
+        try:
+            if sf.info(str(f)).duration > max_minutes * 60:
+                out.append(f)
+        except Exception:  # noqa: BLE001 - si no se puede leer, que lo diga generate
+            pass
     return out
 
 
@@ -204,6 +219,7 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=1, help="canciones a la vez (cada una en un proceso; 2 va bien en 12 GB)")
     parser.add_argument("--max-nps", type=parse_max_nps, default={},
                         help="notas/s como mucho en 2 s, p. ej. 'expert=14,hard=8,medium=5,easy=3.5'")
+    parser.add_argument("--max-minutes", type=float, help="saltar las canciones que duren más de esto")
     parser.add_argument("--drop-stems", action="store_true", help="borrar los stems al terminar cada canción")
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
@@ -218,6 +234,11 @@ def main() -> int:
         files = find_audio(args.audio)
     except ValueError as e:
         parser.error(str(e))
+    if args.max_minutes:
+        long_ = set(too_long(files, args.max_minutes))
+        if long_:
+            print(f"se saltan {len(long_)} de más de {args.max_minutes:g} min: " + ", ".join(f.name for f in sorted(long_)))
+        files = [f for f in files if f not in long_]
     if not files:
         parser.error("no hay archivos de audio")
     common = dict(out_root=args.out, clonehero=args.clonehero, device="cpu" if args.cpu else "cuda",
