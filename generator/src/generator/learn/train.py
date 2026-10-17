@@ -25,7 +25,7 @@ import torch
 import torch.nn.functional as F
 
 from .data import DIFFS, FPS
-from .model import OnsetNet
+from .model import N_MELS, OnsetNet
 
 ROOT = Path(__file__).resolve().parents[4]
 TOL_FRAMES = int(round(0.05 * FPS))  # ±50 ms
@@ -37,6 +37,15 @@ def norm(s: str) -> str:
 
 def is_val(stem: str) -> bool:
     return int(hashlib.md5(stem.encode()).hexdigest(), 16) % 20 == 0
+
+
+def style_of(meta: dict) -> float:
+    """1 = chart de Harmonix (oficial, más sobria), 0 = de la comunidad."""
+    return 1.0 if "harmonix" in (meta.get("charter") or "").lower() else 0.0
+
+
+def with_style(x: np.ndarray, style: float) -> np.ndarray:
+    return np.concatenate([x, np.full((len(x), 1), style, np.float32)], axis=1)
 
 
 class Songs:
@@ -51,7 +60,8 @@ class Songs:
             if norm(meta.get("artist")) + "|" + norm(meta.get("name")) in exclude:
                 continue
             self.items.append({"stem": lab.stem, "feats": np.load(feats, mmap_mode="r"),
-                               "onset": d["onset"], "sustain": d["sustain"], "chord": d["chord"], "meta": meta})
+                               "onset": d["onset"], "sustain": d["sustain"], "chord": d["chord"], "meta": meta,
+                               "style": style_of(meta)})
 
     def split(self):
         return [s for s in self.items if not is_val(s["stem"])], [s for s in self.items if is_val(s["stem"])]
@@ -71,7 +81,7 @@ def batch(songs: list[dict], size: int, length: int, rng: random.Random):
         s = rng.choice(songs)
         t = s["feats"].shape[0]
         a = rng.randint(0, max(0, t - length))
-        x = np.asarray(s["feats"][a:a + length], dtype=np.float32)
+        x = with_style(np.asarray(s["feats"][a:a + length], dtype=np.float32), s["style"])
         pad = length - len(x)
         xs.append(np.pad(x, ((0, pad), (0, 0))))
         on.append(np.pad(soften(s["onset"][:, a:a + length]), ((0, 0), (0, pad))))
@@ -122,9 +132,12 @@ def f1(pred: np.ndarray, ref: np.ndarray, tol: int = TOL_FRAMES) -> tuple[int, i
 
 
 @torch.no_grad()
-def predict_song(model: OnsetNet, feats: np.ndarray, device: str, chunk: int = 4096, overlap: int = 512) -> np.ndarray:
+def predict_song(model: OnsetNet, feats: np.ndarray, device: str, style: float = 1.0,
+                 chunk: int = 4096, overlap: int = 512) -> np.ndarray:
     """Probabilidades (T, 12) para una canción entera, por trozos solapados."""
     model.eval()
+    if model.n_extra > feats.shape[1] - N_MELS:
+        feats = with_style(np.asarray(feats, dtype=np.float32), style)
     t = len(feats)
     out = np.zeros((t, 12), np.float32)
     weight = np.zeros(t, np.float32)
@@ -149,7 +162,7 @@ def predict_song(model: OnsetNet, feats: np.ndarray, device: str, chunk: int = 4
 
 def evaluate(model, songs, device, thresholds=None) -> dict:
     """F1 por dificultad. Si no se dan umbrales, busca el mejor en una rejilla."""
-    probs = [predict_song(model, s["feats"], device) for s in songs]
+    probs = [predict_song(model, s["feats"], device, s.get("style", 1.0)) for s in songs]
     grid = thresholds or {d: None for d in DIFFS}
     result = {}
     for k, d in enumerate(DIFFS):
@@ -193,7 +206,8 @@ def main() -> int:
     train, val = songs.split()
     if not val:  # conjuntos diminutos (pruebas): validar con lo que haya
         val = train[:2]
-    print(f"{len(train)} canciones de entrenamiento, {len(val)} de validación ({len(exclude)} de la biblioteca excluidas)")
+    print(f"{len(train)} canciones de entrenamiento ({sum(s['style'] for s in train):.0f} de Harmonix), "
+          f"{len(val)} de validación ({len(exclude)} de la biblioteca excluidas)")
     device = "cuda"
     model = OnsetNet().to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
@@ -224,7 +238,8 @@ def main() -> int:
                                                  f"umbral {r['threshold']})" for d, r in res.items()))
             if mean > best_f1:
                 best_f1 = mean
-                torch.save({"model": model.state_dict(), "thresholds": {d: r["threshold"] for d, r in res.items()},
+                torch.save({"model": model.state_dict(), "n_extra": model.n_extra,
+                            "thresholds": {d: r["threshold"] for d, r in res.items()},
                             "val": res, "step": step}, args.out)
                 print(f"   guardado (F1 medio {mean:.3f}) -> {args.out}")
     return 0

@@ -13,3 +13,4 @@ library/
 *.mp3
 *.flac
 *.ogg
+models/

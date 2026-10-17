@@ -26,18 +26,19 @@ class ModelNote:
 
 def load(path: Path, device: str = "cuda") -> tuple[OnsetNet, dict]:
     ck = torch.load(path, map_location=device)
-    model = OnsetNet().to(device)
+    model = OnsetNet(n_extra=ck.get("n_extra", 2)).to(device)  # v1 sin entrada de estilo
     model.load_state_dict(ck["model"])
     model.eval()
     return model, ck["thresholds"]
 
 
-def predict(audio: Path, model_path: Path, device: str = "cuda") -> dict[str, list[ModelNote]]:
+def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 1.0) -> dict[str, list[ModelNote]]:
+    """style: 1 = como Harmonix (sobria), 0 = como la comunidad (más cargada); los modelos v1 lo ignoran."""
     model, thresholds = load(model_path, device)
     y = load_mono(audio, SR)
     peak = np.abs(y).max()
     feats = features(y / peak if peak > 0 else y, device)
-    probs = predict_song(model, feats, device)
+    probs = predict_song(model, feats, device, style)
     out = {}
     for k, d in enumerate(DIFFS):
         on = peaks(probs[:, k], thresholds[d])
