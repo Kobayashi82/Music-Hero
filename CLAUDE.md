@@ -15,7 +15,7 @@ Ver ROADMAP.md para fases y criterios de terminado.
 ## Comandos
 - Scripts de la app / fase 0: `uv run --project app python tools/<script>.py`
 - Scripts del generador: `uv run --project generator python tools/<script>.py`
-- Generar una chart: `uv run --project generator generate "<canción.mp3>" [--clonehero]` → `out/charts/<canción>/` (chart.json, preview.html, stems/, clonehero/)
+- Generar charts: `uv run --project generator generate "<canción.mp3 o carpeta>" [--jobs 2] [--clonehero]` → `out/charts/<canción>/` (chart.json, preview.html, stems/, clonehero/). Usa `models/best.pt` (copia del mejor modelo, fuera de git; `--no-model` = reglas); salta lo ya hecho con el mismo audio, versión y modelo (`--force` lo rehace).
 - Usar una chart humana (Chorus Encore .sng o carpeta): `uv run --project generator generate "<canción.mp3>" --human <chart.sng>`
 - Tests (sin GPU): `uv run --project generator --with pytest --with jsonschema pytest tests`
 - Música del usuario: `D:\Programas\Multimedia\Musicas` (reproductor: AIMP)

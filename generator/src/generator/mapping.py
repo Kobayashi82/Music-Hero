@@ -62,6 +62,11 @@ class MapParams:
     stem_weight: dict[str, float] = field(
         default_factory=lambda: {"guitar": 1.0, "piano": 0.75, "other": 0.65, "vocals": 0.6, "bass": 0.45}
     )
+    # Notas por segundo como mucho en cualquier ventana de 2 s (charts del modelo). Algo por encima
+    # del p90 de las charts humanas (13 / 7 / 5 / 3,5): solo recorta excesos.
+    max_nps: dict[str, float] = field(
+        default_factory=lambda: {"expert": 14.0, "hard": 8.0, "medium": 5.0, "easy": 3.5}
+    )
 
 
 @dataclass
@@ -383,6 +388,21 @@ def map_expert(
     return notes, sections, source
 
 
+def limit_density(notes: list, max_nps: float, window_ms: int = 2000) -> list:
+    """Quita las notas menos claras (strength) donde una ventana de window_ms pasa de max_nps por segundo."""
+    keep = sorted(notes, key=lambda n: n.start_ms)
+    cap = max(1, int(max_nps * window_ms / 1000))
+    while len(keep) > cap:
+        t = np.array([n.start_ms for n in keep])
+        ends = np.searchsorted(t, t + window_ms)
+        counts = ends - np.arange(len(t))
+        i = int(np.argmax(counts))
+        if counts[i] <= cap:
+            break
+        keep.remove(min(keep[i:ends[i]], key=lambda n: n.strength))
+    return keep
+
+
 def map_from_model(
     trans: dict[str, Transcription], tempo: TempoMap, sections: list[Section],
     model_notes: dict, p: MapParams | None = None,
@@ -399,7 +419,9 @@ def map_from_model(
 
     out = {}
     for diff, notes in model_notes.items():
-        chord_at = {round(quantize(tempo.ms_to_beat(n.start_ms)), 6): n.chord for n in notes}
+        if diff in p.max_nps:
+            notes = limit_density(notes, p.max_nps[diff])
+        chord_at ={round(quantize(tempo.ms_to_beat(n.start_ms)), 6): n.chord for n in notes}
         events = timed_events([(n.start_ms, n.end_ms) for n in notes], trans, stem_at, tempo)
         if notes and notes[0].frets is not None:
             frets_at = {}

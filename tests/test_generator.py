@@ -203,3 +203,58 @@ def test_onsetnet_with_frets_shapes_and_init(tmp_path):
     probs = predict_song(new, np.random.randn(100, 82).astype(np.float32), "cpu", chunk=64, overlap=16)
     combos = probs[:, 12:].reshape(100, 4, N_COMBOS)
     assert np.allclose(combos.sum(-1), 1, atol=1e-4) and combos[..., 0].max() < 1e-6
+
+
+# ---------- lote y caché ----------
+
+def test_batch_finds_audio_and_cache(tmp_path):
+    import json
+
+    from generator.cli import find_audio, generator_version, out_dir_for, parse_max_nps, up_to_date
+
+    music = tmp_path / "musica"
+    (music / "disco").mkdir(parents=True)
+    for name in ("disco/01 - a.mp3", "disco/02 - b.FLAC", "disco/portada.jpg", "c.ogg"):
+        (music / name).write_bytes(b"x")
+    found = find_audio([str(music)])
+    assert [f.name for f in found] == ["c.ogg", "01 - a.mp3", "02 - b.FLAC"]
+    for bad in ("", "  ", str(tmp_path / "no.mp3"), str(music / "disco" / "portada.jpg")):
+        with pytest.raises(ValueError):
+            find_audio([bad])
+
+    out_root = tmp_path / "charts"
+    song = music / "disco" / "01 - a.mp3"
+    out = out_dir_for(song, "aaaa1111", out_root)
+    assert out == out_root / "01 - a"
+    out.mkdir(parents=True)
+    (out / "chart.json").write_text(json.dumps({"song": {"audio_sha256": "aaaa1111"},
+                                                "generator": {"version": "0.3.0+m-1"}}), encoding="utf-8")
+    (out / "preview.html").write_text("", encoding="utf-8")
+    assert up_to_date(out, "aaaa1111", "0.3.0+m-1")
+    assert not up_to_date(out, "aaaa1111", "0.3.0+m-2")  # otro modelo: se rehace
+    assert not up_to_date(out, "aaaa1111", "0.3.0+m-1", clonehero=True)
+    # otra canción con el mismo nombre de archivo (otro disco): carpeta aparte
+    assert out_dir_for(song, "bbbb2222", out_root) == out_root / "01 - a (bbbb2222)"
+
+    model = tmp_path / "m.pt"
+    model.write_bytes(b"1")
+    v1 = generator_version(model, None)
+    model.write_bytes(b"2")
+    assert generator_version(model, None) != v1
+    assert generator_version(model, None, {"easy": 3.0}) != generator_version(model, None)
+    assert parse_max_nps("expert=14, easy=3.5") == {"expert": 14.0, "easy": 3.5}
+    with pytest.raises(ValueError):
+        parse_max_nps("facil=3")
+
+
+def test_limit_density_drops_weakest():
+    from generator.learn.infer import ModelNote
+    from generator.mapping import limit_density
+
+    # 20 notas en 1 s (las impares más débiles) y 2 notas sueltas lejos
+    notes = [ModelNote(i * 50, i * 50 + 100, 0.0, 0.9 if i % 2 == 0 else 0.4) for i in range(20)]
+    notes += [ModelNote(10000, 10100, 0.0, 0.2), ModelNote(12000, 12100, 0.0, 0.2)]
+    kept = limit_density(notes, max_nps=5)  # como mucho 10 en 2 s
+    assert len([n for n in kept if n.start_ms < 2000]) == 10
+    assert all(n.strength == 0.9 for n in kept if n.start_ms < 2000)
+    assert [n.start_ms for n in kept if n.start_ms >= 2000] == [10000, 12000]

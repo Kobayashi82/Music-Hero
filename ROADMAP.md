@@ -116,11 +116,11 @@ Cómo funciona (`generator/src/generator/`), lo que no es obvio leyendo el códi
 
 ### Fase 2 – Dificultades y lote
 
-- [ ] Derivar Fácil (3 botones, tiempos fuertes, sin acordes), Medio (4 botones), Difícil (5 botones, pocos acordes) desde Experto.
-- [ ] Densidad máxima de notas por segundo por dificultad, configurable.
-- [ ] `generate carpeta/`: procesa todo, en paralelo controlado, y salta lo ya hecho.
-- [ ] Caché por hash del audio + versión del generador (si cambias el algoritmo, se regenera solo lo necesario).
-- [ ] Guardar los stems separados para no repetir Demucs al ajustar reglas.
+- [x] Las 4 dificultades: las da el modelo propio (OnsetNet, aprendido de charts humanas) en vez de derivarlas de Experto con reglas.
+- [x] Densidad máxima de notas por segundo por dificultad, configurable (`--max-nps`; por defecto 14 / 8 / 5 / 3,5 en 2 s, algo por encima del p90 de las charts humanas).
+- [x] `generate carpeta/`: procesa todo (subcarpetas incluidas), `--jobs N` canciones a la vez, y salta lo ya hecho.
+- [x] Caché por hash del audio + versión del generador y del modelo (si cambias el algoritmo o el modelo, se regenera solo lo necesario).
+- [x] Guardar los stems separados para no repetir Demucs al ajustar reglas (~50 MB por canción; `--drop-stems` los borra).
 
 **Terminado cuando:** una carpeta de 50 canciones se procesa sin intervención y tiene las 4 dificultades.
 
