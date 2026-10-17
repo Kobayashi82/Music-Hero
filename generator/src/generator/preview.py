@@ -15,7 +15,7 @@ STEM_ORDER = ["guitar", "piano", "other", "vocals", "bass"]
 
 
 def write_preview(path: Path, song: SongInfo, tempo: TempoMap, notes: list[ChartNote], sections: list[Section],
-                  source: list[SourceNote], generator_version: str) -> None:
+                  source: list[SourceNote], generator_version: str, taps=None) -> None:
     data = {
         "title": song.title,
         "artist": song.artist,
@@ -27,6 +27,7 @@ def write_preview(path: Path, song: SongInfo, tempo: TempoMap, notes: list[Chart
         "src": sorted([[s.start_ms, s.end_ms, s.pitch, round(s.amp, 2), STEM_ORDER.index(s.stem),
                         int(s.origin == "onset")] for s in source if s.stem in STEM_ORDER]),
         "beats": tempo.beats_ms,
+        "taps": [[a - taps.offset_ms, b - taps.offset_ms] for a, b in taps.taps] if taps else [],
         "downbeats": tempo.downbeats_ms,
         "sections": [[tempo.beat_to_ms(s.start_beat), tempo.beat_to_ms(s.end_beat),
                       STEM_ORDER.index(s.stem) if s.stem in STEM_ORDER else -1, round(s.energy, 2)]
@@ -99,7 +100,8 @@ let view = "timeline", clicks = false, span = 8, lastT = 0, actx = null, seekTo 
   document.getElementById("stats").innerHTML =
     `<b>${n.length}</b> notas · <b>${(n.length/dur).toFixed(1)}</b> nps (máx ${maxNps}) · acordes <b>${pct(chords)}</b> · HOPO <b>${pct(hopos)}</b> · sustains <b>${pct(sus)}</b> · energía <b>${energy.toFixed(2)}</b> · fuente: ${src} · v${D.version}`;
   document.getElementById("legend").innerHTML = D.stems.map(s => `<span style="--c:${STEMC[s]}">${NAMES[s]}</span>`).join("")
-    + `<span style="--c:#fff">contorno elegido</span> · espacio play · ← → ±5 s · V vista · C clics · clic para saltar`;
+    + `<span style="--c:#fff">contorno elegido</span>` + (D.taps.length ? `<span style="--c:#fff">ritmo marcado (${D.taps.length} toques)</span>` : "")
+    + ` · espacio play · ← → ±5 s · V vista · C clics · clic para saltar`;
 })();
 
 // ---------- utilidades ----------
@@ -152,6 +154,10 @@ function drawTimeline(W, H, now) {
   for (let i = n0; i < D.notes.length && D.notes[i][0] <= tB + 2000; i++) { const n = D.notes[i];
     const y = Y(n[5]) + rowH/2; if (first) { ctx.moveTo(X(n[0]), y); first = false; } else ctx.lineTo(X(n[0]), y); }
   ctx.stroke();
+  // ritmo marcado a mano (ya corregido el retardo)
+  ctx.fillStyle = "#ffffff";
+  for (let i = lowerBound(D.taps, tA - 5000, x => x[0]); i < D.taps.length && D.taps[i][0] <= tB; i++) {
+    const [a, b] = D.taps[i]; ctx.fillRect(X(a), laneTop - 5, Math.max(3, (b - a) * px), 4); }
   // carriles
   for (let l = 0; l < 5; l++) { ctx.fillStyle = l % 2 ? "#181b22" : "#1c1f28"; ctx.fillRect(0, laneTop + (4-l)*laneH, W, laneH); }
   for (let i = n0; i < D.notes.length && D.notes[i][0] <= tB; i++) {

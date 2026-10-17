@@ -88,6 +88,11 @@ Primera valoración (v0.1): Queen escasa, Sk8er Boi bien, Graceland complicada, 
 | Paul Simon – Graceland | pop, guitarra limpia | 0,80 | 4,8 → 3,7 | 22 % | 2 % | 5 / 17 ms |
 | Cigarettes After Sex – Apocalypse | lento, ambiental | 0,23 | 4,4 → 1,6 | 12 % | 24 % | 6 / 20 ms |
 
+Segunda valoración (v0.2): **ninguna sirve**. El ritmo que se siente (lo que se tamborilearía en una mesa) no lo dicta un instrumento: en Queen, al principio, es un "ta ta taaaa" por compás y la chart pone muchas notas. Decisión: hacer las dos cosas:
+
+1. **Ritmo marcado a mano** (hecho): `uv run --project app tap` con la canción sonando en AIMP; Espacio = "ta", mantener = "taaaa". Se guarda en `data/taps/<canción>.json` (en el repo: son la referencia de lo que se siente) y `generate` lo usa solo: los toques mandan el cuándo y el cuánto; la transcripción solo da la altura para el botón (la voz si canta justo ahí, si no la pista del tramo). El retardo (audio + reflejos) se estima comparando los toques con los ataques fuertes del audio y se resta. Fuera de los tramos grabados sigue el automático. Prueba: `tools/autotest_tap.py` (inicio y duración con 0-2 ms de error respecto a la posición de AIMP).
+2. **Automático que siga el motivo** (pendiente): la melodía principal (voz o riff) con sus notas largas, en vez de los ataques de los instrumentos; medido contra los ritmos marcados a mano.
+
 Cómo funciona (`generator/src/generator/`), lo que no es obvio leyendo el código:
 - **Energía por compás** (`feel.py`): sobre todo lo presente que está la batería respecto a la mezcla (mediana por tramo: unos -26 dB en una balada, -10..-12 dB en rock/punk/pop), y algo del volumen del tramo dentro de la canción.
 - **Presupuesto**: de 0,75 notas por pulso (energía 0) a 2,25 (energía 1). Semicorcheas solo con energía ≥ 0,75 y entre notas claras de Basic Pitch.

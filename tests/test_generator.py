@@ -116,6 +116,39 @@ def test_energy_sets_density_and_keeps_strong_beats():
     assert sum(n.beat % 1 == 0 for n in calm) / len(calm) > 0.8  # en lo tranquilo, sobre todo tiempos fuertes
 
 
+# ---------- ritmo marcado a mano ----------
+
+def test_tap_offset_estimation():
+    from generator.taps import estimate_offset
+
+    peaks = np.arange(0, 60000, 500.0)
+    taps = [int(x + 70 + (i % 3) * 5) for i, x in enumerate(peaks[10:40])]
+    assert estimate_offset(taps, peaks) == pytest.approx(75, abs=5)
+    assert estimate_offset(taps[:5], peaks) == 0  # pocos datos: no se corrige
+
+
+def test_taps_drive_the_chart(tmp_path):
+    from generator.taps import Taps
+
+    t = tempo_120()
+    b = t.beat_to_ms
+    # Transcripción con corcheas por todas partes...
+    notes = [(b(1 + i * 0.5), b(1.4 + i * 0.5), 40 + (i % 4), 0.8) for i in range(70)]
+    trans = {"guitar": fake_transcription("guitar", notes, b(40))}
+    # ...pero el ritmo marcado entre los pulsos 9 y 17 es "ta ta taaaa" por compás (+60 ms de retardo).
+    lag = 60
+    taps_list = []
+    for m in (9, 13):
+        taps_list += [(b(m) + lag, b(m) + 100 + lag), (b(m + 1) + lag, b(m + 1) + 100 + lag),
+                      (b(m + 2) + lag, b(m + 3.5) + lag)]
+    taps = Taps(tmp_path / "x.json", taps_list, [(b(9) - 100, b(17) - 100)], offset_ms=lag)
+    out, _, _ = map_expert(trans, t, t.ms_to_beat(b(40)), MapParams(), taps=taps)
+    inside = [n for n in out if b(9) - 100 <= n.time_ms <= b(17) - 100]
+    assert [n.beat for n in inside] == [9, 10, 11, 13, 14, 15]
+    assert [n.sustain_ms > 0 for n in inside] == [False, False, True] * 2
+    assert any(n.beat < 9 for n in out) and any(n.beat > 17 for n in out)  # fuera, el automático
+
+
 # ---------- exportación ----------
 
 def test_exports_agree(tmp_path):

@@ -12,6 +12,9 @@ dependencies = [
     "winrt-Windows.Media.Control>=3.0",
 ]
 
+[project.scripts]
+tap = "app.tap:main"
+
 [tool.uv]
 environments = ["sys_platform == 'win32'"]
 

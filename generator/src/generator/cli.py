@@ -25,6 +25,8 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     from .preview import write_preview
     from .rhythm import TempoMap, detect_beats
     from .separate import separate
+    from .taps import accent_peaks, estimate_offset
+    from .taps import load as load_taps
     from .transcribe import transcribe
 
     t0 = time.perf_counter()
@@ -49,14 +51,19 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     step("notas: " + ", ".join(f"{s} {len(t.notes)}" for s, t in trans.items()))
 
     feel = analyze(audio, stems["drums"])
+    taps = load_taps(audio, song.audio_sha256)
+    if taps:
+        taps.offset_ms = estimate_offset([a for a, _ in taps.taps], accent_peaks(feel))
+        step(f"ritmo marcado a mano: {len(taps.taps)} toques de {taps.path.name}, "
+             f"retardo corregido {taps.offset_ms} ms")
     end_beat = tempo.ms_to_beat(song.duration_ms)
-    notes, sections, source = map_expert(trans, tempo, end_beat, feel=feel)
+    notes, sections, source = map_expert(trans, tempo, end_beat, feel=feel, taps=taps)
     energy = sum(s.energy for s in sections) / max(1, len(sections))
     step(f"chart Experto: {len(notes)} notas, energía media {energy:.2f}")
 
     data = chart_json(song, tempo, {"expert": notes}, sections, __version__)
     write_json(out / "chart.json", data)
-    write_preview(out / "preview.html", song, tempo, notes, sections, source, __version__)
+    write_preview(out / "preview.html", song, tempo, notes, sections, source, __version__, taps)
     if clonehero:
         write_clonehero(out / "clonehero", song, tempo, {"expert": notes}, sections)
     step(f"listo: {out}")

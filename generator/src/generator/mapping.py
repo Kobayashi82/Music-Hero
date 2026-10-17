@@ -26,6 +26,7 @@ from .rhythm import TempoMap, quantize
 
 if TYPE_CHECKING:  # transcribe carga torch y Basic Pitch; aquí solo hace falta el tipo
     from .feel import Feel
+    from .taps import Taps
     from .transcribe import Transcription
 
 
@@ -129,7 +130,7 @@ def _clean_pitches(pitches: dict[int, float], ratio: float) -> dict[int, float]:
 
 def build_events(
     trans: dict[str, Transcription], sections: list[Section], tempo: TempoMap, p: MapParams,
-    feel: Feel | None = None,
+    feel: Feel | None = None, taps: Taps | None = None,
 ) -> list[Event]:
     grouped: dict[tuple[float, str], Event] = {}
     for sec in sections:
@@ -164,6 +165,22 @@ def build_events(
         if feel is not None and sec.stem:
             picked += _groove_fill(picked, events, sec, trans[sec.stem], tempo, feel, p, measure_starts)
         kept += picked
+
+    if taps is not None:
+        # Donde hay ritmo marcado a mano, manda el ritmo marcado.
+        from .taps import tap_events
+
+        starts = [s.start_beat for s in sections]
+
+        def stem_at(ms: float) -> str:
+            i = int(np.searchsorted(starts, tempo.ms_to_beat(ms), side="right")) - 1
+            return sections[i].stem if i >= 0 else ""
+
+        kept = [e for e in kept if not taps.covers(tempo.beat_to_ms(e.beat))]
+        for e in tap_events(taps, trans, stem_at, tempo):
+            e.pitches = _clean_pitches(e.pitches, p.chord_amp_ratio)
+            kept.append(e)
+
     kept.sort(key=lambda e: e.beat)
     _limit_chords(kept, sections, p)
     return kept
@@ -372,11 +389,11 @@ def _sustains_and_hopos(notes: list[ChartNote], tempo: TempoMap, p: MapParams) -
 
 def map_expert(
     trans: dict[str, Transcription], tempo: TempoMap, end_beat: float, p: MapParams | None = None,
-    feel: Feel | None = None,
+    feel: Feel | None = None, taps: Taps | None = None,
 ) -> tuple[list[ChartNote], list[Section], list[SourceNote]]:
     p = p or MapParams()
     sections = choose_sections(trans, tempo, end_beat, p)
-    events = build_events(trans, sections, tempo, p, feel)
+    events = build_events(trans, sections, tempo, p, feel, taps)
     notes = assign_frets(events, tempo, p)
     source = [n for t in trans.values() for n in t.notes]
     return notes, sections, source
