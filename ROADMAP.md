@@ -124,6 +124,8 @@ Cómo funciona (`generator/src/generator/`), lo que no es obvio leyendo el códi
 
 **Terminado cuando:** una carpeta de 50 canciones se procesa sin intervención y tiene las 4 dificultades.
 
+Estado (18-10-2026): ✅ toda la carpeta de música (676 canciones; se saltan 7 de más de 30 min) procesada sin intervención con `generate "D:/Programas/Multimedia/Musicas" --jobs 3 --max-minutes 30`: 676 de 676 con las 4 dificultades, 55 min sin Demucs (102 min la primera vez), 49 GB con stems. Modelo: OnsetNet v4 (ritmo + botones aprendidos de charts humanas). Lo que salió del primer lote y se arregló: MP3 dentro de un contenedor WAV, pistas sin pulsos, nombres que acaban en punto o espacio, títulos fuera de cp1252, carpetas pisadas al procesar en paralelo dos audios con el mismo nombre, y charts vacías en pistas ambientales (densidad mínima por dificultad).
+
 ### Fase 3 – Juego en overlay con reproductor propio
 
 Primero con audio reproducido por la propia app: así la sincronía es exacta y se aísla el problema del juego.
