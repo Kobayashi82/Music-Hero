@@ -233,6 +233,9 @@ def test_batch_finds_audio_and_cache(tmp_path):
     assert up_to_date(out, "aaaa1111", "0.3.0+m-1")
     assert not up_to_date(out, "aaaa1111", "0.3.0+m-2")  # otro modelo: se rehace
     assert not up_to_date(out, "aaaa1111", "0.3.0+m-1", clonehero=True)
+    # Windows no admite carpetas que acaban en punto o espacio
+    assert out_dir_for(music / "Long While....mp3", "c", out_root) == out_root / "Long While"
+    assert out_dir_for(music / "The Man in Me .mp3", "c", out_root) == out_root / "The Man in Me"
     # otra canción con el mismo nombre de archivo (otro disco): carpeta aparte
     assert out_dir_for(song, "bbbb2222", out_root) == out_root / "01 - a (bbbb2222)"
 
@@ -265,3 +268,49 @@ def test_limit_density_drops_weakest():
     assert len([n for n in kept if n.start_ms < 2000]) == 10
     assert all(n.strength == 0.9 for n in kept if n.start_ms < 2000)
     assert [n.start_ms for n in kept if n.start_ms >= 2000] == [10000, 12000]
+
+
+def test_steady_beats_for_beatless_tracks():
+    from generator.rhythm import TempoMap, steady_beats
+
+    beats, downbeats = steady_beats(25000)
+    assert beats[:3] == [500, 1000, 1500] and downbeats[:2] == [500, 2500]
+    t = TempoMap.from_beats(beats, downbeats)
+    assert t.ms_to_beat(t.beat_to_ms(10.0)) == pytest.approx(10.0)
+    assert len(steady_beats(1000)[0]) >= 4  # pistas diminutas: al menos 4 pulsos
+
+
+def test_batch_plan_gives_same_named_songs_their_own_folder(tmp_path):
+    from generator.cli import plan_out_dirs
+
+    a, b, c = tmp_path / "d2" / "Bad Guy.mp3", tmp_path / "d3" / "Bad Guy.mp3", tmp_path / "d4" / "Bad Guy.mp3"
+    for f, data in ((a, b"uno"), (b, b"dos"), (c, b"uno")):
+        f.parent.mkdir()
+        f.write_bytes(data)
+    plan = plan_out_dirs([a, b, c], tmp_path / "out")
+    assert plan[a] == tmp_path / "out" / "Bad Guy" and plan[b].name.startswith("Bad Guy (")
+    assert plan[c] == plan[a]  # mismo audio: misma carpeta (la caché la salta)
+
+
+def test_wrapped_mp3_detection(tmp_path):
+    import soundfile as sf
+
+    from generator.audio import wrapped_mp3
+
+    sf.write(tmp_path / "x.wav", np.zeros(800, np.float32), 8000)
+    (tmp_path / "x.mp3").write_bytes((tmp_path / "x.wav").read_bytes())  # WAV con extensión .mp3
+    assert wrapped_mp3(tmp_path / "x.mp3") and not wrapped_mp3(tmp_path / "x.wav")
+
+
+def test_min_density_lowers_threshold():
+    from generator.learn.infer import onsets_with_min
+
+    prob = np.zeros(1000, np.float32)
+    prob[[100, 300, 500, 700]] = 0.9  # claras
+    prob[[200, 400, 600, 800]] = 0.25  # dudosas (pista ambiental)
+    on, th = onsets_with_min(prob, 0.7, 2)
+    assert len(on) == 4 and th == 0.7  # ya llega: no se toca
+    on, th = onsets_with_min(prob, 0.7, 8)
+    assert len(on) == 8 and th == 0.2
+    on, th = onsets_with_min(np.zeros(1000, np.float32), 0.7, 8)
+    assert len(on) == 0  # nada que encontrar: no inventa notas

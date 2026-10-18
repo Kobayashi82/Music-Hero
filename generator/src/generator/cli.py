@@ -87,11 +87,28 @@ def _chart_of(out: Path) -> dict | None:
 
 def out_dir_for(audio: Path, sha: str, out_root: Path) -> Path:
     """out/<nombre>; si ahí ya hay la chart de otro audio con el mismo nombre, out/<nombre> (<hash>)."""
-    out = out_root / audio.stem
+    name = audio.stem.rstrip(" .") or "sin nombre"  # Windows quita el punto o espacio final de las carpetas
+    out = out_root / name
     old = _chart_of(out)
     if old is not None and old.get("song", {}).get("audio_sha256") not in (None, sha):
-        out = out_root / f"{audio.stem} ({sha[:8]})"
+        out = out_root / f"{name} ({sha[:8]})"
     return out
+
+
+def plan_out_dirs(files: list[Path], out_root: Path) -> dict[Path, Path]:
+    """Carpeta de cada canción del lote, decidida antes de repartirlas entre procesos: dos audios
+    distintos con el mismo nombre (p. ej. en dos discos) procesados a la vez elegirían la misma."""
+    from .audio import sha256_file
+
+    plan, taken = {}, {}  # carpeta -> hash
+    for f in files:
+        sha = sha256_file(f)
+        out = out_dir_for(f, sha, out_root)
+        if taken.get(out, sha) != sha:
+            out = out.with_name(f"{out.name} ({sha[:8]})")
+        taken[out] = sha
+        plan[f] = out
+    return plan
 
 
 def up_to_date(out: Path, sha: str, version: str, clonehero: bool = False) -> bool:
@@ -103,7 +120,8 @@ def up_to_date(out: Path, sha: str, version: str, clonehero: bool = False) -> bo
 
 def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str = "cuda",
              human_chart: Path | None = None, model_path: Path | None = None, force: bool = False,
-             max_nps: dict[str, float] | None = None, drop_stems: bool = False, tag: str = "") -> Path | None:
+             max_nps: dict[str, float] | None = None, drop_stems: bool = False, tag: str = "",
+             out_dir: Path | None = None) -> Path | None:
     """Genera la chart de una canción. Devuelve su carpeta, o None si ya estaba hecha (caché)."""
     from .audio import song_info
 
@@ -114,7 +132,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
 
     song = song_info(audio)
     version = generator_version(model_path, human_chart, max_nps)
-    out = out_dir_for(audio, song.audio_sha256, out_root)
+    out = out_dir or out_dir_for(audio, song.audio_sha256, out_root)
     if not force and up_to_date(out, song.audio_sha256, version, clonehero):
         print(f"{tag}{audio.name}: ya hecha ({out.name})", flush=True)
         return None
@@ -125,7 +143,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     from .mapping import MapParams, map_expert
     from .model import MELODIC_STEMS
     from .preview import write_preview
-    from .rhythm import TempoMap, detect_beats
+    from .rhythm import TempoMap, detect_beats, steady_beats
     from .separate import separate
     from .transcribe import transcribe
 
@@ -134,6 +152,9 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     step("pistas separadas (Demucs htdemucs_6s)")
 
     beats, downbeats = detect_beats(audio, device)
+    if len(set(beats)) < 4:
+        beats, downbeats = steady_beats(song.duration_ms)
+        step("sin pulsos claros: rejilla fija de 120 BPM")
     tempo = TempoMap.from_beats(beats, downbeats)
     step(f"{len(beats)} pulsos, {len(downbeats)} compases, ~{tempo.bpm_at(len(beats) / 2):.0f} BPM, "
          f"{tempo.beats_per_measure}/4")
@@ -184,7 +205,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
 
 def _worker(kw: dict) -> tuple[str, str, float]:
     """Una canción en un proceso aparte: (archivo, 'hecha' | 'saltada' | 'error: ...', segundos)."""
-    sys.stdout.reconfigure(line_buffering=True)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     t0 = time.perf_counter()
     try:
         r = generate(**kw)
@@ -222,7 +243,7 @@ def main() -> int:
     parser.add_argument("--max-minutes", type=float, help="saltar las canciones que duren más de esto")
     parser.add_argument("--drop-stems", action="store_true", help="borrar los stems al terminar cada canción")
     args = parser.parse_args()
-    sys.stdout.reconfigure(line_buffering=True)
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
     model = None if args.no_model else args.model
     if model is not None and not model.exists():
@@ -250,7 +271,8 @@ def main() -> int:
 
     print(f"{len(files)} canciones, {args.jobs} a la vez, modelo: {model.name if model else 'ninguno (reglas)'}")
     t0, results = time.perf_counter(), []
-    jobs = [dict(common, audio=f, tag=f"[{i + 1}/{len(files)}] ") for i, f in enumerate(files)]
+    plan = plan_out_dirs(files, args.out)
+    jobs = [dict(common, audio=f, out_dir=plan[f], tag=f"[{i + 1}/{len(files)}] ") for i, f in enumerate(files)]
     if args.jobs <= 1:
         results = [_worker(kw) for kw in jobs]
     else:

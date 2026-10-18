@@ -17,6 +17,21 @@ MIN_SUSTAIN_S = 0.2  # sostenidos más cortos que esto son notas normales
 # Con 0,5 el modelo marca un 14 % de fotogramas como sostenidos frente al 36 % de las
 # charts humanas (biblioteca, v1); con 0,25 la proporción es parecida (38 %).
 SUSTAIN_THRESHOLD = 0.25
+# Notas por segundo como mínimo (p1 de las charts humanas: 0,84 / 0,65 / 0,45 / 0,33). En pistas
+# ambientales el modelo apenas pasa del umbral y la chart sale vacía: se baja el umbral hasta llegar.
+MIN_NPS = {"expert": 0.8, "hard": 0.6, "medium": 0.4, "easy": 0.3}
+LOWER_THRESHOLDS = (0.5, 0.4, 0.3, 0.2, 0.1, 0.05)
+
+
+def onsets_with_min(prob: np.ndarray, threshold: float, min_count: int) -> tuple[np.ndarray, float]:
+    """Inicios con el umbral del modelo; si salen menos de min_count, con umbrales más bajos."""
+    on = peaks(prob, threshold)
+    for th in LOWER_THRESHOLDS:
+        if len(on) >= min_count:
+            break
+        if th < threshold:
+            on, threshold = peaks(prob, th), th
+    return on, threshold
 
 
 @dataclass
@@ -44,8 +59,11 @@ def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 
     feats = features(y / peak if peak > 0 else y, device)
     probs = predict_song(model, feats, device, style)
     out = {}
+    seconds = len(probs) / FPS
     for k, d in enumerate(DIFFS):
-        on = peaks(probs[:, k], thresholds[d])
+        on, th = onsets_with_min(probs[:, k], thresholds[d], int(MIN_NPS[d] * seconds))
+        if th != thresholds[d]:
+            print(f"    {d}: pocas notas con el umbral {thresholds[d]}, bajado a {th} ({len(on)} notas)", flush=True)
         notes = []
         for i, f in enumerate(on):
             nxt = on[i + 1] if i + 1 < len(on) else len(probs)

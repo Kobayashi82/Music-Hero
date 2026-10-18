@@ -23,6 +23,13 @@ def detect_beats(audio: Path, device: str = "cuda") -> tuple[list[int], list[int
     return [int(round(b * 1000)) for b in beats_s], [int(round(d * 1000)) for d in downbeats_s]
 
 
+def steady_beats(duration_ms: int, bpm: float = 120.0, per_measure: int = 4) -> tuple[list[int], list[int]]:
+    """Rejilla fija para pistas sin pulsos claros (ambientales, interludios muy cortos)."""
+    step = 60000 / bpm
+    beats = [int(round(step * (i + 1))) for i in range(max(4, int(duration_ms / step)))]
+    return beats, beats[::per_measure]
+
+
 @dataclass
 class TempoMap:
     anchor_beats: np.ndarray  # posición en pulsos de cada ancla
