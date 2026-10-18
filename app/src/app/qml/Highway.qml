@@ -466,12 +466,9 @@ Item {
                         id: rowMouse
                         anchors.fill: parent
                         hoverEnabled: true
+                        enabled: root.f.menu.rows[index] >= 0  // las filas vacías de la última página, no
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
                         onClicked: (mouse) => mouse.button === Qt.RightButton ? bridge.menuBack() : bridge.menuClick(index)
-                    }
-                    Rectangle {  // la lista vuelve a empezar (menús circulares)
-                        visible: index === root.f.menu.wrap
-                        x: 16; y: -4; width: parent.width - 32; height: 2; radius: 1; color: "#50ffffff"
                     }
                     Text { x: 16; anchors.verticalCenter: parent.verticalCenter
                            width: parent.width - 48 - valueText.implicitWidth; elide: Text.ElideRight

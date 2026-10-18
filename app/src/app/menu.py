@@ -3,8 +3,9 @@
 - Strum arriba/abajo: mover. Verde, + o Intro: elegir. Rojo, − o Retroceso: volver.
 - Una opción con valor (change) se elige para editarla: el strum la cambia (arriba sube) y elegir o
   volver deja de editar. Los cambios se aplican en el momento.
-- Las listas largas son circulares: se ven por ventanas de WINDOW opciones con la elegida en el centro,
-  y al pasar de la última sigue la primera; amarillo / azul saltan PAGE (también dando la vuelta).
+- Las listas largas se ven por páginas de WINDOW opciones: la página se queda quieta y se mueve la selección;
+  al pasar de la última fila se pasa a la página siguiente (con la selección arriba) y, tras la última
+  página, a la primera. Amarillo / azul pasan página entera.
 - SearchMenu: buscador. Con el teclado se escribe directamente; con la guitarra, en «Escribir» el strum
   elige la letra y verde la añade.
 """
@@ -16,7 +17,6 @@ from dataclasses import dataclass
 from html import escape
 
 WINDOW = 11
-PAGE = 10
 LETTERS = "abcdefghijklmnñopqrstuvwxyz0123456789 "
 
 
@@ -33,7 +33,6 @@ class Option:
 
 
 class Menu:
-    circular = True  # las listas largas se ven como una rueda
     edit_hint = ""  # ayuda al editar (vacío: la de siempre)
 
     def __init__(self, title: str, options: list[Option], body: Callable[[], str] | str = "",
@@ -56,9 +55,12 @@ class Menu:
             self.sel = (self.sel + direction) % len(self.options)
 
     def page(self, direction: int) -> None:
-        """Salto largo, para las listas largas (da la vuelta, como el strum)."""
+        """Página siguiente o anterior, en la misma fila (o la última, si la página es más corta); da la vuelta."""
         if not self.editing and self.options:
-            self.sel = (self.sel + direction * PAGE) % len(self.options)
+            n = len(self.options)
+            pages = -(-n // WINDOW)
+            p = (self.sel // WINDOW + direction) % pages
+            self.sel = min(p * WINDOW + self.sel % WINDOW, n - 1)
 
     @property
     def long(self) -> bool:
@@ -81,32 +83,26 @@ class Menu:
         return False
 
     def view(self) -> dict:
-        """Lo que pinta QML: solo la ventana de opciones alrededor de la elegida. En las largas (circulares),
-        la elegida va en el centro y wrap es la fila donde vuelve a empezar la lista (-1 si no se ve)."""
+        """Lo que pinta QML: la página de la elegida. En las largas, la última página se rellena con filas vacías
+        (rows -1) para que el menú no cambie de alto."""
         n = len(self.options)
-        wrap = -1
-        if self.long and self.circular:
-            idx = [(self.sel - WINDOW // 2 + i) % n for i in range(WINDOW)]
-            sel = WINDOW // 2
-            wrap = next((r for r in range(1, WINDOW) if idx[r] == 0), -1)
-            above = below = True
-        else:
-            start = max(0, min(self.sel - WINDOW // 2, n - WINDOW))
-            idx = list(range(start, min(n, start + WINDOW)))
-            sel = self.sel - start
-            above, below = start > 0, start + WINDOW < n
+        start = self.sel // WINDOW * WINDOW if self.long else 0
+        idx = list(range(start, min(n, start + WINDOW)))
         shown = [self.options[i] for i in idx]
-        return {"title": self.title, "body": self.body, "sel": sel, "editing": self.editing,
-                "items": [o.label for o in shown], "values": [o.value() if callable(o.value) else (o.value or "") for o in shown],
-                "above": above, "below": below, "wrap": wrap, "editHint": self.edit_hint, "rows": idx,
-                "position": f"{self.sel + 1} / {n}" if self.long else ""}
+        pad = WINDOW - len(idx) if self.long else 0
+        items = [o.label for o in shown] + [""] * pad
+        values = [o.value() if callable(o.value) else (o.value or "") for o in shown] + [""] * pad
+        pages = -(-n // WINDOW)
+        return {"title": self.title, "body": self.body, "sel": self.sel - start, "editing": self.editing,
+                "items": items, "values": values, "rows": idx + [-1] * pad,
+                "above": start > 0, "below": start + WINDOW < n, "editHint": self.edit_hint,
+                "position": f"{self.sel + 1} / {n} · página {start // WINDOW + 1} de {pages}" if self.long else ""}
 
 
 class SearchMenu(Menu):
     """Buscador: «Escribir» (con la guitarra: strum elige la letra, verde la añade), «Borrar» y debajo los
     resultados de search(texto). Con el teclado, type() y backspace()."""
 
-    circular = False  # «Escribir» siempre arriba
     edit_hint = "Strum: letra · Verde / +: añadirla · Rojo / −: listo"
     FIXED = 2  # opciones antes de los resultados
 

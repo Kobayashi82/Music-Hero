@@ -3,7 +3,7 @@
 import json
 
 from app.library import NO_ALBUM, group, scan, search, split_prefix
-from app.menu import PAGE, WINDOW, Menu, Option, SearchMenu
+from app.menu import WINDOW, Menu, Option, SearchMenu
 
 
 def make_song(tmp, charts, rel: str, title: str, artist: str = "", album: str = "", sha: str = "") -> None:
@@ -50,30 +50,29 @@ def test_prefijos():
     assert split_prefix("Queen - Hammer to Fall") == (None, "Queen - Hammer to Fall")
 
 
-def test_menu_largo_en_ventana():
-    m = Menu("t", [Option(str(i), value=str(i * 2)) for i in range(40)])
-    assert len(m.view()["items"]) == WINDOW
-    m.page(1)
-    m.page(1)
-    assert m.sel == 2 * PAGE
+def test_menu_largo_por_paginas():
+    m = Menu("t", [Option(str(i), value=str(i * 2)) for i in range(40)])  # páginas de 11: 0-10 ... 33-39
     v = m.view()
-    assert v["items"][v["sel"]] == str(2 * PAGE) and v["position"] == "21 / 40"
-    assert v["values"][v["sel"]] == str(4 * PAGE)  # valor fijo (texto)
-
-
-def test_menu_largo_circular():
-    m = Menu("t", [Option(str(i)) for i in range(40)])
+    assert v["items"][0] == "0" and v["sel"] == 0 and not v["above"] and v["below"]
+    for _ in range(WINDOW - 1):
+        m.move(1)
+    assert m.view()["items"][0] == "0" and m.view()["sel"] == WINDOW - 1  # la página quieta, baja la selección
+    m.move(1)
     v = m.view()
-    assert v["sel"] == WINDOW // 2 and v["items"][v["sel"]] == "0" and v["above"] and v["below"]
-    assert v["items"][0] == str(40 - WINDOW // 2)  # por encima de la primera, las últimas
-    assert v["wrap"] == WINDOW // 2  # y ahí vuelve a empezar
+    assert v["items"][0] == str(WINDOW) and v["sel"] == 0 and v["above"]  # página siguiente, arriba
+    assert v["values"][0] == str(2 * WINDOW) and v["position"] == "12 / 40 · página 2 de 4"
+    m.page(1), m.page(1)
+    v = m.view()  # última página: 33-39 y cuatro filas vacías (mismo alto)
+    assert m.sel == 39 - 6 and len(v["items"]) == WINDOW and v["items"][-1] == "" and v["rows"][-1] == -1
+    m.sel = 39
+    m.move(1)
+    assert m.sel == 0 and m.view()["items"][0] == "0"  # tras la última, la primera página
     m.move(-1)
-    assert m.sel == 39 and m.view()["items"][WINDOW // 2 + 1] == "0"
-    m.page(1)
-    assert m.sel == PAGE - 1  # el salto también da la vuelta
-    m.page(-1)
+    assert m.sel == 39 and m.view()["items"][0] == "33"
+    m.sel = 9
+    m.page(-1)  # de la primera a la última, en la misma fila o la última que haya
     assert m.sel == 39
-    assert Menu("t", [Option(str(i)) for i in range(5)]).view()["wrap"] == -1  # las cortas, como siempre
+    assert len(Menu("t", [Option(str(i)) for i in range(5)]).view()["items"]) == 5  # las cortas, sin relleno
 
 
 def test_buscar(tmp_path):

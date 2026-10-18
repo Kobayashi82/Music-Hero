@@ -58,7 +58,7 @@ TOAST_S = 2.5
 SIDE_MARGIN = 640  # la ventana es la autopista más esto (la mitad a cada lado): sitio para el marcador
 CALIB_LANE = 2  # las notas de la calibración bajan por el carril amarillo (el del centro)
 MENU_HINT = "Strum: mover · Verde / +: elegir · Rojo / −: volver"
-LONG_HINT = MENU_HINT + " · Amarillo / Azul: saltar 10"
+LONG_HINT = MENU_HINT + " · Amarillo / Azul: pasar página"
 POSITIONS = {"left": "Izquierda", "center": "Centro", "right": "Derecha"}
 MENU_REPEAT_S = (0.35, 0.08, 0.035)  # strum mantenido en un menú: espera, repetición y, pasados 2 s, más rápido
 SIDES = {"left": "Izquierda", "right": "Derecha"}
@@ -297,7 +297,6 @@ class Session(QObject):
                 self.cfg.aimp_offset_ms = round(lag)
                 self.cfg.save()
                 self.apply_offsets()
-                self.toast(f"Sincronizado con AIMP ({lag:+.0f} ms)")
         player = self.player
         if (self.synced or self.sync_thread is not None or now < self.sync_retry_at
                 or not isinstance(player, AimpPlayer) or not player.playing or player.position_ms() < 1000):
@@ -725,7 +724,7 @@ class Session(QObject):
             return
         menu = self.menus[-1]
         rows = menu.view()["rows"]
-        if not 0 <= row < len(rows):
+        if not 0 <= row < len(rows) or rows[row] < 0:  # fuera, o fila vacía de la última página
             return
         if menu.editing and rows[row] != menu.sel:
             menu.editing = False
