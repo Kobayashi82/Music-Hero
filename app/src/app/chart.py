@@ -1,10 +1,10 @@
-"""Charts del generador (shared/chart_schema.json): cargar y encontrar la de un audio."""
+"""Charts del generador (shared/chart_schema.json, v1 y v2): cargar y encontrar la de un audio."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -31,6 +31,7 @@ class Chart:
     beats: list[tuple[int, bool]]  # (ms, inicio de compás)
     difficulties: dict[str, list[Note]]
     folder: Path
+    star_power: dict[str, list[tuple[int, int]]] = field(default_factory=dict)  # (inicio, fin) ms; v2, si las trae
 
     @classmethod
     def load(cls, path: Path) -> Chart:
@@ -39,15 +40,18 @@ class Chart:
             path = path / "chart.json"
         d = json.loads(path.read_text(encoding="utf-8"))
         song = d["song"]
-        diffs = {}
+        diffs, star = {}, {}
         for name in DIFFS:
-            notes = d["difficulties"].get(name, {}).get("notes", [])
+            track = d["difficulties"].get(name, {})
+            notes = track.get("notes", [])
             if notes:
                 diffs[name] = [Note(int(n["time_ms"]), tuple(sorted(n["frets"])), int(n.get("sustain_ms", 0)),
                                     bool(n.get("hopo", False))) for n in notes]
+                if track.get("star_power"):
+                    star[name] = [(int(p["time_ms"]), int(p["time_ms"]) + int(p["length_ms"])) for p in track["star_power"]]
         return cls(song["title"], song["artist"], Path(song["audio_file"]), song["audio_sha256"],
                    int(song["duration_ms"]), [(int(b["time_ms"]), bool(b.get("downbeat"))) for b in d.get("beats", [])],
-                   diffs, path.parent)
+                   diffs, path.parent, star)
 
 
 def sha256_file(path: Path) -> str:

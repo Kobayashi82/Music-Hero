@@ -150,16 +150,62 @@ def test_exports_agree(tmp_path):
     audio.write_bytes(b"")
     song = SongInfo("Título", "Artista", "", b(30), "0" * 64, str(audio))
 
-    data = chart_json(song, t, {"expert": out}, sections, "test")
+    star = {"expert": [(b(6), b(10))]}
+    data = chart_json(song, t, {"expert": out}, sections, "test", star_power=star)
+    assert data["difficulties"]["expert"]["star_power"] == [{"time_ms": b(6), "length_ms": b(10) - b(6)}]
     jsonschema = pytest.importorskip("jsonschema")
     jsonschema.validate(data, json.loads((ROOT / "shared" / "chart_schema.json").read_text(encoding="utf-8")))
 
-    folder = write_clonehero(tmp_path / "ch", song, t, {"expert": out}, sections)
+    folder = write_clonehero(tmp_path / "ch", song, t, {"expert": out}, sections, star_power=star)
     txt = (folder / "notes.chart").read_text(encoding="utf-8-sig")
+    assert re.search(r"^\s*\d+ = S 2 \d+", txt, re.M)
+    from generator.human import chart_star_power  # lo que se escribe se vuelve a leer igual
+    (a, e), = chart_star_power(txt)["expert"]
+    assert a == pytest.approx(b(6), abs=2) and e == pytest.approx(b(10), abs=2)
     ticks = sorted({int(x) for x, f in re.findall(r"^\s*(\d+) = N (\d) \d+", txt, re.M) if int(f) < 5})
     bpm = int(re.search(r"= B (\d+)", txt.split("[SyncTrack]")[1]).group(1)) / 1000
     for tick, n in zip(ticks, data["difficulties"]["expert"]["notes"]):
         assert tick / RESOLUTION * 60000 / bpm == pytest.approx(n["time_ms"], abs=1)
+
+
+def test_star_power_of_human_charts(tmp_path):
+    from generator.human import chart_star_power, mid_star_power
+
+    chart = """[Song]
+{
+  Resolution = 192
+}
+[SyncTrack]
+{
+  0 = B 120000
+  768 = B 60000
+}
+[ExpertSingle]
+{
+  192 = N 0 0
+  384 = S 2 192
+  1152 = S 2 384
+}
+[EasySingle]
+{
+  192 = N 0 0
+}
+"""
+    # 120 ppm hasta el tick 768 (2 s), luego 60 ppm: el tick 1152 cae a los 4 s
+    assert chart_star_power(chart) == {"expert": [(1000, 1500), (4000, 6000)]}
+
+    mido = pytest.importorskip("mido")
+    mid = mido.MidiFile(ticks_per_beat=480)
+    tempo = mido.MidiTrack([mido.MetaMessage("set_tempo", tempo=500000, time=0)])
+    gtr = mido.MidiTrack([mido.MetaMessage("track_name", name="PART GUITAR", time=0),
+                          mido.Message("note_on", note=116, velocity=100, time=960),
+                          mido.Message("note_on", note=96, velocity=100, time=0),
+                          mido.Message("note_off", note=96, velocity=0, time=120),
+                          mido.Message("note_off", note=116, velocity=0, time=840)])
+    mid.tracks += [tempo, gtr]
+    path = tmp_path / "notes.mid"
+    mid.save(str(path))
+    assert mid_star_power(path) == [(1000, 2000)]
 
 
 # ---------- modelo propio (OnsetNet), sin GPU ----------

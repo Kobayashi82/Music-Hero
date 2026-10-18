@@ -87,7 +87,7 @@ class WiiGuitar:
 
     @classmethod
     def open(cls, accel: bool = False) -> WiiGuitar:
-        """accel: pedir también el acelerómetro (informes 0x35; sin probar aún en el juego)."""
+        """accel: pedir también el acelerómetro (informes 0x35: el juego lo usa para el star power)."""
         found = cls.find()
         if not found:
             raise RuntimeError("no hay ningún Wiimote emparejado (tools/pair_wiimote.py)")

@@ -1,7 +1,7 @@
 """Charts hechas por personas (Chorus Encore, Rock Band, Clone Hero) sincronizadas con el audio propio.
 
 Lee notes.chart o notes.mid (formato Rock Band: pista "PART GUITAR") de una
-carpeta o un .sng, y calcula el desfase entre el audio del paquete y el archivo
+carpeta o un .sng, con sus frases de star power, y calcula el desfase entre el audio del paquete y el archivo
 del usuario correlando sus curvas de ataque en varios tramos de la canción.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +19,7 @@ from .model import ChartNote
 DIFFS = ("expert", "hard", "medium", "easy")
 CHART_SECTIONS = {"expert": "ExpertSingle", "hard": "HardSingle", "medium": "MediumSingle", "easy": "EasySingle"}
 MID_BASE = {"expert": 96, "hard": 84, "medium": 72, "easy": 60}  # verde; +1..+4 el resto; +5 HOPO forzado; +6 strum forzado
+MID_STAR, MID_STAR_OLD = 116, 103  # frase de star power (Rock Band; las conversiones de GH1/2 usan 103 si no hay 116)
 AUDIO_EXT = (".opus", ".ogg", ".mp3", ".wav", ".flac")
 STEM_AUDIO = ("song", "guitar", "rhythm", "bass", "drums", "drums_1", "drums_2", "drums_3", "drums_4", "vocals",
               "vocals_1", "vocals_2", "keys", "crowd")
@@ -30,6 +31,7 @@ class HumanChart:
     charter: str
     difficulties: dict[str, list[ChartNote]]
     audio_files: list[Path]
+    star_power: dict[str, list[tuple[int, int]]] = field(default_factory=dict)  # (inicio, fin) en ms, por dificultad
 
 
 # ---------- tempo ----------
@@ -73,12 +75,17 @@ def _finish(raw: list[tuple[int, list[int], int, bool | None]], tm: _TickMap, ho
 
 # ---------- .chart ----------
 
-def read_chart(text: str) -> dict[str, list[ChartNote]]:
+def _chart_parse(text: str) -> tuple[dict[str, str], _TickMap]:
     sections = dict(re.findall(r"\[(\w+)\]\s*\{([^}]*)\}", text))
     song = dict(re.findall(r"^\s*(\w+)\s*=\s*\"?([^\"\n]*)\"?\s*$", sections.get("Song", ""), re.M))
     res = int(float(song.get("Resolution", 192)))
     tempos = [(int(t), 60e6 / (int(v) / 1000)) for t, v in re.findall(r"^\s*(\d+)\s*=\s*B\s+(\d+)", sections["SyncTrack"], re.M)]
-    tm = _TickMap(res, tempos)
+    return sections, _TickMap(res, tempos)
+
+
+def read_chart(text: str) -> dict[str, list[ChartNote]]:
+    sections, tm = _chart_parse(text)
+    res = tm.res
     out = {}
     for diff, name in CHART_SECTIONS.items():
         body = sections.get(name)
@@ -102,9 +109,22 @@ def read_chart(text: str) -> dict[str, list[ChartNote]]:
     return out
 
 
+def chart_star_power(text: str) -> dict[str, list[tuple[int, int]]]:
+    """Frases de star power de un .chart ("S 2 <duración>" en cada dificultad), en ms de la chart."""
+    sections, tm = _chart_parse(text)
+    out = {}
+    for diff, name in CHART_SECTIONS.items():
+        found = re.findall(r"^\s*(\d+)\s*=\s*S\s+2\s+(\d+)", sections.get(name, ""), re.M)
+        phrases = sorted((round(tm.to_ms(int(t))), round(tm.to_ms(int(t) + int(n)))) for t, n in found)
+        if phrases:
+            out[diff] = phrases
+    return out
+
+
 # ---------- notes.mid (Rock Band) ----------
 
-def read_mid(path_or_bytes: Path | bytes) -> dict[str, list[ChartNote]]:
+def _mid_parse(path_or_bytes: Path | bytes) -> tuple[_TickMap, list[tuple[int, int, bool]] | None]:
+    """Mapa de tempo y eventos (tick, nota, encendida) de la pista de guitarra (None si no la hay)."""
     import io
 
     import mido
@@ -113,7 +133,6 @@ def read_mid(path_or_bytes: Path | bytes) -> dict[str, list[ChartNote]]:
         mid = mido.MidiFile(file=io.BytesIO(path_or_bytes), clip=True)  # algunos MIDI traen bytes > 127
     else:
         mid = mido.MidiFile(str(path_or_bytes), clip=True)
-    res = mid.ticks_per_beat
     tempos = []
     for track in mid.tracks[:1]:
         tick = 0
@@ -121,11 +140,11 @@ def read_mid(path_or_bytes: Path | bytes) -> dict[str, list[ChartNote]]:
             tick += msg.time
             if msg.type == "set_tempo":
                 tempos.append((tick, float(msg.tempo)))
-    tm = _TickMap(res, tempos)
+    tm = _TickMap(mid.ticks_per_beat, tempos)
     guitar = next((t for t in mid.tracks if t.name.strip().upper() in ("PART GUITAR", "T1 GEMS")), None)
     if guitar is None:
-        return {}
-    events: list[tuple[int, int, bool]] = []  # (tick, nota, encendida)
+        return tm, None
+    events: list[tuple[int, int, bool]] = []
     tick = 0
     for msg in guitar:
         tick += msg.time
@@ -133,6 +152,14 @@ def read_mid(path_or_bytes: Path | bytes) -> dict[str, list[ChartNote]]:
             events.append((tick, msg.note, True))
         elif msg.type in ("note_off", "note_on"):
             events.append((tick, msg.note, False))
+    return tm, events
+
+
+def read_mid(path_or_bytes: Path | bytes) -> dict[str, list[ChartNote]]:
+    tm, events = _mid_parse(path_or_bytes)
+    if events is None:
+        return {}
+    res = tm.res
     out = {}
     for diff, base in MID_BASE.items():
         starts: dict[int, int] = {}
@@ -171,6 +198,26 @@ def read_mid(path_or_bytes: Path | bytes) -> dict[str, list[ChartNote]]:
     return out
 
 
+def mid_star_power(path_or_bytes: Path | bytes) -> list[tuple[int, int]]:
+    """Frases de star power de un notes.mid (las mismas en todas las dificultades), en ms de la chart."""
+    tm, events = _mid_parse(path_or_bytes)
+    if events is None:
+        return []
+    for note in (MID_STAR, MID_STAR_OLD):
+        phrases, start = [], None
+        for t, n, on in events:
+            if n != note:
+                continue
+            if on and start is None:
+                start = t
+            elif not on and start is not None:
+                phrases.append((round(tm.to_ms(start)), round(tm.to_ms(t))))
+                start = None
+        if phrases:
+            return phrases
+    return []
+
+
 def load(path: Path) -> HumanChart:
     """Carpeta de chart o .sng."""
     if path.suffix.lower() == ".sng":
@@ -189,9 +236,12 @@ def load(path: Path) -> HumanChart:
     if path.suffix.lower() == ".sng":
         ini = {**meta, **ini}
     if (folder / "notes.chart").exists():
-        diffs = read_chart((folder / "notes.chart").read_text(encoding="utf-8-sig", errors="replace"))
+        text = (folder / "notes.chart").read_text(encoding="utf-8-sig", errors="replace")
+        diffs, star = read_chart(text), chart_star_power(text)
     elif (folder / "notes.mid").exists():
         diffs = read_mid(folder / "notes.mid")
+        phrases = mid_star_power(folder / "notes.mid")
+        star = {d: list(phrases) for d in diffs} if phrases else {}
     else:
         raise FileNotFoundError(f"no hay notes.chart ni notes.mid en {folder}")
     # delay del song.ini (ms): el audio va adelantado/retrasado respecto a la chart
@@ -200,9 +250,10 @@ def load(path: Path) -> HumanChart:
         for notes in diffs.values():
             for n in notes:
                 n.time_ms += delay
+        star = {d: [(a + delay, b + delay) for a, b in ph] for d, ph in star.items()}
     audio = [p for p in folder.iterdir() if p.suffix.lower() in AUDIO_EXT and p.stem.lower() in STEM_AUDIO]
     name = f"{ini.get('artist', '?')} - {ini.get('name', path.stem)}"
-    return HumanChart(name, ini.get("charter", ini.get("frets", "?")), diffs, audio)
+    return HumanChart(name, ini.get("charter", ini.get("frets", "?")), diffs, audio, star)
 
 
 # ---------- sincronización con el audio propio ----------
@@ -313,4 +364,15 @@ def shift(diffs: dict[str, list[ChartNote]], alignment: Alignment, tempo) -> dic
             m.end_beat = tempo.ms_to_beat(t + m.sustain_ms) if m.sustain_ms else m.beat
             moved.append(m)
         out[d] = moved
+    return out
+
+
+def shift_star_power(star: dict[str, list[tuple[int, int]]], alignment: Alignment) -> dict[str, list[tuple[int, int]]]:
+    """Las frases de star power, al audio propio (como las notas en shift)."""
+    out = {}
+    for d, phrases in star.items():
+        moved = [(round(alignment(a)), round(alignment(b))) for a, b in phrases]
+        moved = [(a, b) for a, b in moved if a >= 0 and b > a]
+        if moved:
+            out[d] = moved
     return out

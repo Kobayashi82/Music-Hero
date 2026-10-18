@@ -1,4 +1,4 @@
-"""Salidas: chart.json (shared/chart_schema.json v1) y carpeta Clone Hero/YARG (notes.chart + song.ini)."""
+"""Salidas: chart.json (shared/chart_schema.json v2) y carpeta Clone Hero/YARG (notes.chart + song.ini)."""
 
 import json
 import shutil
@@ -8,7 +8,7 @@ from pathlib import Path
 from .model import ChartNote, Section, SongInfo
 from .rhythm import TempoMap
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # v2: frases de star power por dificultad
 RESOLUTION = 192
 CH_HOPO_TICKS = 65  # umbral de HOPO natural de Clone Hero/YARG a 192 ticks por pulso
 CH_TRACKS = {"expert": "ExpertSingle", "hard": "HardSingle", "medium": "MediumSingle", "easy": "EasySingle"}
@@ -32,7 +32,9 @@ def _tempo_changes(tempo: TempoMap, sections: list[Section]) -> list[dict]:
 
 
 def chart_json(song: SongInfo, tempo: TempoMap, difficulties: dict[str, list[ChartNote]],
-               sections: list[Section], generator_version: str, source_stem: str = "guitar") -> dict:
+               sections: list[Section], generator_version: str, source_stem: str = "guitar",
+               star_power: dict[str, list[tuple[int, int]]] | None = None) -> dict:
+    """star_power: frases (inicio, fin) en ms por dificultad (las de la chart humana); sin ellas, el juego las pone."""
     downbeats = set(tempo.downbeats_ms)
     beats = []
     for b in tempo.beats_ms:
@@ -49,6 +51,12 @@ def chart_json(song: SongInfo, tempo: TempoMap, difficulties: dict[str, list[Cha
             d["hopo"] = True
         return d
 
+    def track(diff: str, notes: list[ChartNote]) -> dict:
+        d = {"notes": [note_dict(n) for n in notes]}
+        if (star_power or {}).get(diff):
+            d["star_power"] = [{"time_ms": a, "length_ms": b - a} for a, b in star_power[diff]]
+        return d
+
     song_d = {"title": song.title, "artist": song.artist, "duration_ms": song.duration_ms,
               "audio_sha256": song.audio_sha256, "audio_file": song.audio_path}
     if song.album:
@@ -61,7 +69,7 @@ def chart_json(song: SongInfo, tempo: TempoMap, difficulties: dict[str, list[Cha
                       "source_stem": source_stem},
         "tempo": _tempo_changes(tempo, sections),
         "beats": beats,
-        "difficulties": {k: {"notes": [note_dict(n) for n in v]} for k, v in difficulties.items()},
+        "difficulties": {k: track(k, v) for k, v in difficulties.items()},
     }
 
 
@@ -80,7 +88,8 @@ def _natural_hopo(n: ChartNote, prev: ChartNote | None) -> bool:
 
 
 def write_clonehero(folder: Path, song: SongInfo, tempo: TempoMap, difficulties: dict[str, list[ChartNote]],
-                    sections: list[Section], copy_audio: bool = True) -> Path:
+                    sections: list[Section], copy_audio: bool = True,
+                    star_power: dict[str, list[tuple[int, int]]] | None = None) -> Path:
     """Carpeta lista para YARG/Clone Hero/Moonscraper: notes.chart, song.ini y song.<ext>."""
     folder.mkdir(parents=True, exist_ok=True)
     audio = Path(song.audio_path)
@@ -115,14 +124,21 @@ def write_clonehero(folder: Path, song: SongInfo, tempo: TempoMap, difficulties:
     for diff, notes in difficulties.items():
         lines += [f"[{CH_TRACKS[diff]}]", "{"]
         prev = None
+        events = []
+        for a, b in (star_power or {}).get(diff, []):  # frases de star power: "S 2 <duración>"
+            ta = _tick(tempo.ms_to_beat(a))
+            events.append((ta, f"  {ta} = S 2 {max(1, _tick(tempo.ms_to_beat(b)) - ta)}"))
         for n in notes:
             t = _tick(n.beat)
+            while events and events[0][0] <= t:
+                lines.append(events.pop(0)[1])
             sus = max(0, _tick(n.end_beat) - t) if n.sustain_ms else 0
             for f in sorted(n.frets):
                 lines.append(f"  {t} = N {f} {sus}")
             if n.hopo != _natural_hopo(n, prev):
                 lines.append(f"  {t} = N 5 0")  # invierte el HOPO natural
             prev = n
+        lines += [e for _, e in events]
         lines.append("}")
 
     (folder / "notes.chart").write_text("\n".join(lines) + "\n", encoding="utf-8-sig")

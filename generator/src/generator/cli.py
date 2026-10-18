@@ -215,6 +215,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
         notes = difficulties["expert"]
         step(f"modelo {model_path.name}: " + ", ".join(f"{d} {len(n)}" for d, n in difficulties.items()))
 
+    star_power: dict[str, list[tuple[int, int]]] = {}  # las de la chart humana; sin ellas, el juego las pone
     if human_chart is not None:
         from . import human
 
@@ -228,6 +229,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
             step(f"chart humana descartada, no encaja con el audio: {sync}")
         else:
             shifted = {d: n for d, n in human.shift(hc.difficulties, alignment, tempo).items() if n}
+            star_power = {d: ph for d, ph in human.shift_star_power(hc.star_power, alignment).items() if d in shifted}
             filled = [d for d in difficulties if d not in shifted]
             difficulties = {d: shifted.get(d) or difficulties[d] for d in ("expert", "hard", "medium", "easy")
                             if d in shifted or d in difficulties}
@@ -235,11 +237,11 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
                  + (f"; del modelo: {', '.join(filled)}" if filled else ""))
             notes = difficulties.get("expert", notes)
 
-    data = chart_json(song, tempo, difficulties, sections, version)
+    data = chart_json(song, tempo, difficulties, sections, version, star_power=star_power)
     write_json(out / "chart.json", data)
     write_preview(out / "preview.html", song, tempo, notes, sections, source, version, difficulties)
     if clonehero:
-        write_clonehero(out / "clonehero", song, tempo, difficulties, sections)
+        write_clonehero(out / "clonehero", song, tempo, difficulties, sections, star_power=star_power)
     if lyrics:
         _lyrics(out, device, False, step)
     if drop_stems:

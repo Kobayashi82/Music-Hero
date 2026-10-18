@@ -3,16 +3,19 @@ con luz por dentro, brillo amplio y suave, sin sombras) y algo de luz emitida. S
 una vez, al doble de resolución (más nítidos al reducir), y QML solo los escala (image://sprites/<id>).
 
 Ids:
-    gem/<carril>/<normal|hopo|miss>    nota (GEM_W x GEM_H, con sitio para el halo; la cara es FACE)
+    gem/<carril>/<normal|hopo|miss|star|starhopo>   nota (GEM_W x GEM_H, con sitio para el halo; la cara es FACE);
+                                       star: de una frase de star power (tapa blanca azulada con una estrella)
     fret/<carril>/<up|down>            botón de la línea de golpeo (mismo lienzo y cara que las notas)
     flame/<carril>/<0..FLAME_FRAMES-1> acierto: fuego suave, haz de luz y chispas (base abajo en el centro)
     glow/<carril|white>                halo suave redondo (GLOW x GLOW)
-    tail/<carril>/<normal|live|miss>   cola de una nota larga (TAIL_W x TAIL_H; live = mientras se mantiene).
+    tail/<carril>/<normal|live|miss|star|starlive>   cola de una nota larga (TAIL_W x TAIL_H; live = mientras
+                                       se mantiene; star = de una frase de star power, azul).
                                        QML la proyecta en perspectiva sobre el carril (Highway.qml: quad)
 """
 
 from __future__ import annotations
 
+import math
 import random
 
 import numpy as np
@@ -21,6 +24,7 @@ from PySide6.QtGui import QBrush, QColor, QImage, QLinearGradient, QPainter, QPa
 from PySide6.QtQuick import QQuickImageProvider
 
 COLORS = ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
+STAR = "#7fd4ff"  # star power: notas de frase, colas, autopista (Highway.qml)
 GEM_W, GEM_H = 256, 160
 FACE = QRectF(38, 34, 180, 82)  # elipse de la cara dentro del lienzo (Highway.qml: gemScale, faceY)
 DEPTH = 16  # grosor de la pieza
@@ -202,7 +206,44 @@ def _glass(p: QPainter, r: QRectF, col: QColor, lit: float, frosted: bool = Fals
 
 # ---------- piezas ----------
 
+def _star_path(c: QPointF, r: float, squash: float) -> QPainterPath:
+    """Estrella de 5 puntas, aplastada en vertical como la tapa (vista en perspectiva)."""
+    path = QPainterPath()
+    for i in range(10):
+        a = math.pi / 2 + i * math.pi / 5
+        rr = r if i % 2 == 0 else r * 0.45
+        pt = QPointF(c.x() + rr * math.cos(a), c.y() - rr * math.sin(a) * squash)
+        path.moveTo(pt) if i == 0 else path.lineTo(pt)
+    path.closeSubpath()
+    return path
+
+
+def draw_star_gem(lane: int, hopo: bool) -> QImage:
+    """Nota de una frase de star power: aro y canto del color del carril (se sigue viendo cuál es) y la tapa
+    blanca azulada encendida, con una estrella del color del carril."""
+    col, star = QColor(COLORS[lane]), QColor(STAR)
+    img, p = _img(GEM_W, GEM_H)
+    _halo(p, _body(FACE, DEPTH), star, 0.7)
+    _side(p, FACE, DEPTH, _shade(col, 0.8), _shade(col, 0.38))
+    _bezel(p, FACE, col if hopo else None)
+    cap = FACE.adjusted(13, 7, -13, -9)
+    lift = 5
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(_shade(star, 0.7))
+    p.drawPath(_body(cap.translated(0, -lift), lift))
+    top = cap.translated(0, -lift)
+    _glass(p, top, _shade(star, 1.35), 1.0, frosted=hopo)
+    shape = _star_path(QPointF(top.center().x(), top.center().y() + 1), top.height() * 0.62, top.height() / top.width() * 1.9)
+    p.setPen(QPen(QColor(255, 255, 255, 230), 2.2))
+    p.setBrush(_shade(col, 1.15))
+    p.drawPath(shape)
+    p.end()
+    return _finish(img)
+
+
 def draw_gem(lane: int, kind: str) -> QImage:
+    if kind in ("star", "starhopo"):
+        return draw_star_gem(lane, kind == "starhopo")
     miss = kind == "miss"
     col = QColor("#5a5e68") if miss else QColor(COLORS[lane])
     img, p = _img(GEM_W, GEM_H)
@@ -345,8 +386,8 @@ def draw_tail(lane: int, kind: str) -> QImage:
     """Cola de nota larga, calculada píxel a píxel: color pleno con el centro algo más claro y los bordes
     difuminados (sin líneas). Mantenida: más luminosa y con un resplandor alrededor. El extremo lejano
     (arriba) se funde para que no acabe en seco."""
-    col = QColor("#6b6f78") if kind == "miss" else QColor(COLORS[lane])
-    live = kind == "live"
+    col = QColor("#6b6f78") if kind == "miss" else QColor(STAR) if kind.startswith("star") else QColor(COLORS[lane])
+    live = kind in ("live", "starlive")
     x = np.abs(np.linspace(-1, 1, TAIL_W))[None, :]
     t = np.linspace(0, 1, TAIL_H)[:, None]  # 0 arriba (extremo lejano) .. 1 abajo
 
@@ -396,18 +437,19 @@ class SpriteProvider(QQuickImageProvider):
 
 def contact_sheet() -> QImage:
     """Todos los sprites en una imagen, para revisarlos."""
-    ids = [f"gem/{lane}/{k}" for k in ("normal", "hopo", "miss") for lane in range(5)]
+    ids = [f"gem/{lane}/{k}" for k in ("normal", "hopo", "miss", "star", "starhopo") for lane in range(5)]
     ids += [f"fret/{lane}/{k}" for k in ("up", "down") for lane in range(5)]
     flames = [f"flame/{lane}/{f}" for lane in range(5) for f in (0, 3)]
     half = GEM_W // 2
     fh = int(FLAME_H * half / FLAME_W)
-    sheet = QImage(GEM_W * 5, GEM_H * 5 + fh, QImage.Format.Format_ARGB32_Premultiplied)
+    rows = (len(ids) + 4) // 5
+    sheet = QImage(GEM_W * 5, GEM_H * rows + fh, QImage.Format.Format_ARGB32_Premultiplied)
     sheet.fill(QColor("#0b0b14"))
     p = QPainter(sheet)
     for i, sid in enumerate(ids):
         p.drawImage(GEM_W * (i % 5), GEM_H * (i // 5), draw(sid))
     for i, sid in enumerate(flames):
-        p.drawImage(i * half, GEM_H * 5, draw(sid).scaled(half, fh, Qt.AspectRatioMode.IgnoreAspectRatio,
+        p.drawImage(i * half, GEM_H * rows, draw(sid).scaled(half, fh, Qt.AspectRatioMode.IgnoreAspectRatio,
                                                             Qt.TransformationMode.SmoothTransformation))
     p.end()
     return sheet

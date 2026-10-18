@@ -1,6 +1,8 @@
 // Autopista en perspectiva. Python (play.Bridge.tick) da en cada fotograma un mapa `f` con:
-//   notes: [carril, u, uFin, estado, hopo, sosteniendo, notasDelAcorde] x N  (u: 0 = línea de golpeo,
-//          1 = horizonte; estado 0 pendiente, 1 acertada, 2 fallada)
+//   notes: [carril, u, uFin, estado, hopo, sosteniendo, notasDelAcorde, estrella] x N  (u: 0 = línea de golpeo,
+//          1 = horizonte; estado 0 pendiente, 1 acertada, 2 fallada; estrella: de una frase de star power)
+//   star (barra 0..1), starOn (activo), starReady (se puede activar), phraseFlash / starFlash (1 -> 0 al
+//   completar una frase / al activarlo), mult (con el star power) y baseMult (sin él)
 //   beats: [u, inicioDeCompás] x N, held / burn (sustain sonando): 5 bool, flash / missLane: 5 (0..1),
 //   time (s, para el parpadeo de las llamas), el marcador, menu (title, body, items, values, sel, editing;
 //   vacío si no hay), calib, toast, message, hudSide (marcador: "left" | "right"), lyricsOn y lyrics (current, fill = caracteres ya cantados,
@@ -15,9 +17,11 @@ Item {
                        progress: 0, countdown: 0, menu: ({}), menuHint: "", calib: ({}), toast: "",
                        opacity: 0.85, missFlash: 0, missLane: [0, 0, 0, 0, 0], burn: [false, false, false, false, false],
                        time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560, hudSide: "right",
-                       lyricsOn: false, lyrics: ({}) })
+                       lyricsOn: false, lyrics: ({}), baseMult: 1, star: 0, starOn: false, starReady: false,
+                       phraseFlash: 0, starFlash: 0 })
     readonly property var colors: ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
     readonly property var multColors: ["white", "#ffdc00", "#2ecc40", "#c86cff"]
+    readonly property color starColor: "#7fd4ff"  // sprites.STAR
     readonly property real farScale: 0.38
     readonly property real k: 1 / farScale - 1
     property real hwNear: Math.min(width - 640, f.hwWidth)  // play.SIDE_MARGIN: sitio para el marcador
@@ -27,7 +31,7 @@ Item {
     readonly property real horizonY: height * 0.06
     readonly property int notePool: 200
     readonly property int beatPool: 32
-    readonly property int stride: 7
+    readonly property int stride: 8
     // sprites (app/sprites.py, lienzo 256 x 160 con la cara de 180 x 82 centrada en y = 75): proporción del
     // lienzo, cuánto más ancho es que la cara (el resto es halo) y dónde cae el centro de la cara
     readonly property real gemAspect: 160 / 256
@@ -84,6 +88,25 @@ Item {
             PathLine { x: root.xAt(-0.5, 1); y: root.horizonY }
         }
     }
+    Shape {  // star power activo: la autopista se ilumina de azul, con un pulso suave (y un fogonazo al activarlo)
+        preferredRendererType: Shape.CurveRenderer
+        anchors.fill: parent
+        visible: root.f.starOn
+        opacity: 0.55 + 0.12 * Math.sin(root.f.time * 6) + 0.33 * root.f.starFlash
+        ShapePath {
+            strokeWidth: 0; strokeColor: "transparent"
+            fillGradient: LinearGradient {
+                y1: root.horizonY; y2: root.yAt(-0.25)
+                GradientStop { position: 0; color: "#002a7fff" }
+                GradientStop { position: 0.45; color: "#552a7fff" }
+                GradientStop { position: 1; color: "#a04fb4ff" }
+            }
+            startX: root.xAt(-0.5, 1); startY: root.horizonY
+            PathLine { x: root.xAt(4.5, 1); y: root.horizonY }
+            PathLine { x: root.xAt(4.5, -0.25); y: root.yAt(-0.25) }
+            PathLine { x: root.xAt(-0.5, -0.25); y: root.yAt(-0.25) }
+        }
+    }
     Shape {  // al fallar: la parte de abajo de la autopista se enciende en rojo y se apaga
         preferredRendererType: Shape.CurveRenderer
         anchors.fill: parent
@@ -135,8 +158,9 @@ Item {
                 PathLine { x: root.xAt(rail.outer, -0.25); y: root.yAt(-0.25) }
                 PathLine { x: root.xAt(rail.inner, -0.25); y: root.yAt(-0.25) }
             }
-            ShapePath {  // filo de luz en el lado de dentro
-                strokeWidth: 1.5; strokeColor: "#90ffffff"; fillColor: "transparent"
+            ShapePath {  // filo de luz en el lado de dentro (azul con el star power)
+                strokeWidth: root.f.starOn ? 3 : 1.5; strokeColor: root.f.starOn ? root.starColor : "#90ffffff"
+                fillColor: "transparent"
                 startX: root.xAt(rail.inner, 1); startY: root.horizonY
                 PathLine { x: root.xAt(rail.inner, -0.25); y: root.yAt(-0.25) }
             }
@@ -209,6 +233,7 @@ Item {
             readonly property int state: used ? root.f.notes[o + 3] : 0
             readonly property bool hopo: used && root.f.notes[o + 4] > 0
             readonly property bool sustaining: used && root.f.notes[o + 5] > 0
+            readonly property bool star: used && root.f.notes[o + 7] > 0
             readonly property color col: state === 2 ? "#6a6a6a" : root.colors[lane]
             visible: used
 
@@ -219,7 +244,8 @@ Item {
                 readonly property real wk: gem.sustaining ? 0.5 : 0.42
                 readonly property real w0: root.laneW * wk * root.s(u0) / 2
                 readonly property real w1: root.laneW * wk * root.s(gem.uEnd) / 2
-                source: root.sprite("tail/" + gem.lane + "/" + (gem.state === 2 ? "miss" : gem.sustaining ? "live" : "normal"))
+                source: root.sprite("tail/" + gem.lane + "/" + (gem.state === 2 ? "miss"
+                                    : (gem.star ? "star" : "") + (gem.sustaining ? "live" : gem.star ? "" : "normal")))
                 smooth: true
                 x: 0; y: 0; width: 64; height: 256
                 transform: Matrix4x4 {
@@ -237,14 +263,15 @@ Item {
                 x: root.xAt(gem.lane, gem.u) - w / 2; y: root.yAt(gem.u) - h * root.faceY
                 width: w; height: h
                 Image {
-                    visible: gem.hopo && gem.state !== 2
+                    visible: gem.hopo && gem.state !== 2 && !gem.star
                     source: root.sprite("glow/white"); smooth: true
                     width: parent.w * 1.0; height: parent.h * 1.1
                     x: (parent.w - width) / 2; y: parent.h * root.faceY - height / 2; opacity: 0.5
                 }
                 Image {
                     anchors.fill: parent; smooth: true; mipmap: true
-                    source: root.sprite("gem/" + gem.lane + "/" + (gem.state === 2 ? "miss" : gem.hopo ? "hopo" : "normal"))
+                    source: root.sprite("gem/" + gem.lane + "/" + (gem.state === 2 ? "miss"
+                                        : gem.star ? (gem.hopo ? "starhopo" : "star") : gem.hopo ? "hopo" : "normal"))
                 }
             }
         }
@@ -289,7 +316,7 @@ Item {
         readonly property real lr: onRight ? outer : inner
         readonly property real wpx: (lr - ll) * sB
         readonly property real uT: root.uAtY(root.yAt(uB) - height * wpx / width)
-        readonly property color multColor: root.multColors[Math.min(3, root.f.mult - 1)]
+        readonly property color multColor: root.f.starOn ? root.starColor : root.multColors[Math.min(3, root.f.baseMult - 1)]
         width: 300; height: hudCol.implicitHeight + 40
         transform: Matrix4x4 {
             matrix: root.quad(hud.width, hud.height,
@@ -333,13 +360,39 @@ Item {
                         model: 10
                         Rectangle {
                             width: 11; height: 11; radius: 5.5
-                            color: root.f.mult >= 4 || index < root.f.streak % 10 ? hud.multColor : "#33ffffff"
+                            color: root.f.baseMult >= 4 || index < root.f.streak % 10 ? hud.multColor : "#33ffffff"
                         }
                     }
                 }
                 Text { text: "×" + root.f.mult; color: hud.multColor; font.pixelSize: 52; font.bold: true
                        style: Text.Raised; styleColor: "#80000000" }
             }
+            Item {  // barra de star power: un cuarto por frase; desde la mitad se puede activar
+                anchors.right: parent.right; width: 236; height: 22
+                readonly property real glow: root.f.starOn ? 1 : root.f.starReady ? 0.6 + 0.4 * Math.sin(root.f.time * 7) : 0
+                Rectangle {  // halo cuando está lista o activa, y al completar una frase
+                    anchors.centerIn: bar; width: bar.width + 14; height: bar.height + 12; radius: height / 2
+                    color: root.starColor; opacity: Math.max(parent.glow * 0.35, root.f.phraseFlash * 0.7)
+                    visible: opacity > 0.01
+                }
+                Rectangle {
+                    id: bar
+                    anchors.verticalCenter: parent.verticalCenter; width: parent.width; height: 12; radius: 6
+                    color: "#33ffffff"; border.color: "#50ffffff"
+                    Rectangle {
+                        width: parent.width * Math.max(0, Math.min(1, root.f.star)); height: parent.height; radius: 6
+                        color: root.f.starOn || root.f.starReady ? root.starColor : "#3d86c6"
+                    }
+                    Repeater {  // marcas de los cuartos
+                        model: 3
+                        Rectangle { x: bar.width * (index + 1) / 4 - 1; width: 2; height: bar.height
+                                    color: index === 1 ? "#c0ffffff" : "#60ffffff" }
+                    }
+                }
+            }
+            Text { anchors.right: parent.right
+                   text: root.f.starOn ? "¡Star power!" : root.f.starReady ? "Star power: levanta la guitarra" : " "
+                   color: root.starColor; font.pixelSize: 16; font.bold: true }
             Text { anchors.right: parent.right
                    text: root.f.streak > 1 ? root.f.streak + " seguidas" : root.f.streak === 1 ? "1 seguida" : " "
                    color: "white"; font.pixelSize: 20 }

@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "music-hero/chart/v1",
-  "title": "Music Hero chart v1",
-  "description": "Chart generada para una canción. Todos los tiempos en milisegundos (int) desde el inicio del audio. Cualquier cambio incompatible sube schema_version.",
+  "$id": "music-hero/chart/v2",
+  "title": "Music Hero chart v2",
+  "description": "Chart generada para una canción. Todos los tiempos en milisegundos (int) desde el inicio del audio. Cualquier cambio sube schema_version. v2: frases de star power por dificultad (v1 es igual sin ellas; la app lee las dos).",
   "type": "object",
   "required": ["schema_version", "song", "generator", "tempo", "beats", "difficulties"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
 
     "song": {
       "type": "object",
@@ -87,6 +87,19 @@
           "type": "array",
           "description": "Ordenadas por time_ms; como mucho una nota (o acorde) por time_ms.",
           "items": { "$ref": "#/$defs/note" }
+        },
+        "star_power": {
+          "type": "array",
+          "description": "Frases de star power (las de la chart humana), ordenadas. Las notas con time_ms en [time_ms, time_ms + length_ms) son de la frase. Sin este campo, el juego las elige solo.",
+          "items": {
+            "type": "object",
+            "required": ["time_ms", "length_ms"],
+            "additionalProperties": false,
+            "properties": {
+              "time_ms": { "type": "integer", "minimum": 0 },
+              "length_ms": { "type": "integer", "minimum": 1 }
+            }
+          }
         }
       }
     },

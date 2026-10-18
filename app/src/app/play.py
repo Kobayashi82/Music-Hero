@@ -11,7 +11,8 @@ AIMP: su posición es el reloj, cada canción que ponga carga su chart, los salt
 del juego pausa AIMP. Si la canción no tiene chart, la pausa ofrece generarla en segundo plano.
 
 Controles: ver app/inputs.py (A S D F G + flechas, o la guitarra de Wii). + o Espacio abren el menú
-(dificultad, ajustes, calibración); − o Tab cambian de dificultad sin parar. Ctrl+Alt+H muestra/oculta;
+(dificultad, ajustes, calibración); − o Tab cambian de dificultad sin parar; levantar la guitarra o E activan
+el star power. Ctrl+Alt+H muestra/oculta;
 Ctrl+Alt+Q sale. Ajustes en %APPDATA%/MusicHero/config.json (se guardan solos desde el menú).
 """
 
@@ -35,7 +36,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap, QPo
 from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from . import calibration, loopback, win32
+from . import calibration, loopback, starpower, win32
 from .aimp import CMD_NEXT, CMD_PAUSE, CMD_PREV, PLAYING, Aimp, AimpPlayer, Track
 from .chart import DIFF_NAMES, DIFFS, ROOT, Chart, find_chart
 from .config import Config
@@ -66,6 +67,7 @@ AIMP_CHECK_S = 0.3  # cada cuánto se mira qué canción tiene AIMP
 OWN_SEEK_S = 0.6  # los saltos que hace el propio juego en AIMP (reiniciar) no cuentan como saltos del usuario
 GENERATE_LOG = ROOT / "out" / "generate_aimp.log"
 SONG_COMMANDS = ("next", "prev", "random")  # botones 1, 2 y Home del Wiimote
+PHRASE_FLASH_S = 0.6  # la barra de star power se enciende al completar una frase
 
 
 class Session(QObject):
@@ -127,6 +129,11 @@ class Session(QObject):
         self.difficulty = d if d in chart.difficulties else next(iter(chart.difficulties))
         self.beats = chart.beats
         self.beat_times = [b[0] for b in self.beats]
+        # frases de star power: las de la chart (v2, de la humana) o, si no trae, las de la heurística; las de la
+        # dificultad más alta valen para las que no tengan (muchas charts solo las marcan en Experto)
+        hardest = next(d for d in DIFFS if d in chart.difficulties)
+        self.phrases = (next((chart.star_power[d] for d in DIFFS if chart.star_power.get(d)), None)
+                        or starpower.phrases(chart.difficulties[hardest], chart.beats))
         self.menus.clear()
         self.results, self.resume_at = "", None
         self.flash_t, self.miss_lane_t, self.miss_t = [0.0] * 5, [0.0] * 5, 0.0
@@ -139,8 +146,10 @@ class Session(QObject):
 
     def new_game(self) -> None:
         notes = self.chart.difficulties[self.difficulty]
-        self.game = Game(notes)
+        self.game = Game(notes, phrases=self.chart.star_power.get(self.difficulty) or self.phrases, beats=self.beat_times)
         self.game.held |= {i for i, h in enumerate(self.held) if h}
+        self.phrase_t = self.star_t = 0.0  # cuándo se completó la última frase y cuándo se activó
+        self.star_hint = False  # ya se avisó de que se puede activar
         self.times = [n.time_ms for n in notes]
         self.max_sustain = max((n.sustain_ms for n in notes), default=0)
         self.partial = self.autoplay
@@ -837,6 +846,8 @@ class Session(QObject):
         if not self.player.playing or self.waiting:
             return
         t = self.player.position_ms(ev.t)
+        if ev.kind == "control" and ev.value == "star":
+            self.game.activate(t)
         if ev.kind == "fret":
             self.game.fret(ev.value, ev.down, t)
         elif ev.kind == "strum" and ev.down:
@@ -894,7 +905,15 @@ class Session(QObject):
             if kind == "hit":
                 for f in ns.note.frets:
                     self.flash_t[f] = now
-            else:  # fallo o strum de más: se marca el carril de la nota (o los trastes pulsados)
+            elif kind == "phrase":
+                self.phrase_t = now
+                if self.game.star_ready and not self.star_hint and not self.autoplay:
+                    self.star_hint = True
+                    key = win32.combo_label(keymap(self.cfg.keys)["star"])
+                    self.toast(f"Star power listo: levanta la guitarra (o {key})")
+            elif kind == "star":
+                self.star_t = now
+            elif kind in ("miss", "overstrum"):  # se marca el carril de la nota (o los trastes pulsados)
                 self.miss_t = now
                 lanes = ns.note.frets if ns is not None else [i for i, h in enumerate(self.held) if h]
                 for f in lanes:
@@ -939,7 +958,11 @@ class Session(QObject):
             "burn": [i in burn for i in range(5)],
             "missFlash": max(0.0, 1 - (now - self.miss_t) / 0.35),
             "missLane": [max(0.0, 1 - (now - mt) / 0.4) for mt in self.miss_lane_t],
-            "score": st.score, "streak": st.streak, "mult": st.multiplier, "accuracy": st.accuracy,
+            "score": st.score, "streak": st.streak, "mult": st.multiplier, "baseMult": st.base_multiplier,
+            "accuracy": st.accuracy,
+            "star": self.game.energy, "starOn": st.star, "starReady": self.game.star_ready,
+            "phraseFlash": max(0.0, 1 - (now - self.phrase_t) / PHRASE_FLASH_S),
+            "starFlash": max(0.0, 1 - (now - self.star_t) / 0.8),
             "title": f"AIMP · {self.aimp_title}" if not active else f"{self.chart.artist} – {self.chart.title}",
             "difficulty": DIFF_NAMES[self.difficulty],
             "autoplay": self.autoplay, "best": self.best_score, "partial": self.partial,
@@ -960,7 +983,7 @@ class Session(QObject):
             if -BEHIND_MS / travel <= u <= 1.02:
                 beats += [u, 1]
                 if i not in self.calib_hits:
-                    notes += [CALIB_LANE, u, u, 2 if u < -calibration.MAX_DEV_MS / travel else 0, 0, 0, 1]
+                    notes += [CALIB_LANE, u, u, 2 if u < -calibration.MAX_DEV_MS / travel else 0, 0, 0, 1, 0]
         return notes, beats
 
     def song_notes(self, now: float, travel: float) -> tuple[list, list]:
@@ -980,9 +1003,10 @@ class Session(QObject):
                 if ns.sustain_until >= n.time_ms + n.sustain_ms - 1:
                     continue  # sustain completo
                 state = MISSED  # soltado antes: la cola en gris
+            star = int(self.game.is_star(ns))
             for f in n.frets:
-                notes += [f, max(u, -0.25), u_end, state, int(n.hopo), int(ns.sustaining), len(n.frets)]
-            if len(notes) >= 7 * 200:
+                notes += [f, max(u, -0.25), u_end, state, int(n.hopo), int(ns.sustaining), len(n.frets), star]
+            if len(notes) >= 8 * 200:
                 break
         beats = []
         i = bisect.bisect_left(self.beat_times, tv - BEHIND_MS)
@@ -994,8 +1018,11 @@ class Session(QObject):
         return notes, beats
 
     def play_itself(self, t: float) -> None:
-        """Modo automático: toca cada nota a su tiempo y mantiene los trastes hasta la siguiente."""
+        """Modo automático: toca cada nota a su tiempo y mantiene los trastes hasta la siguiente; el star power,
+        en cuanto se puede."""
         g = self.game
+        if g.star_ready:
+            g.activate(t)
         while g.next < len(g.notes) and g.notes[g.next].note.time_ms <= t:
             ns = g.notes[g.next]
             g.held = set(ns.note.frets)
@@ -1030,7 +1057,9 @@ class Session(QObject):
         lines = [f"<b>{DIFF_NAMES[self.difficulty]}: {play.hits}/{play.total} notas ({play.accuracy:.0%})"
                  f"{' · ¡sin fallos!' if play.full_combo else ''}</b>",
                  f"Puntos: {fmt_int(play.score)}",
-                 f"Mejor racha: {st.best_streak} · Strums de más: {st.overstrums}", record]
+                 f"Mejor racha: {st.best_streak} · Strums de más: {st.overstrums}"
+                 + (f" · Star power: {st.phrases}/{len(self.game.phrase_left)} frases" if self.game.phrase_left else ""),
+                 record]
         if len(st.offsets) >= 20:
             offs = sorted(st.offsets)
             med = offs[len(offs) // 2]

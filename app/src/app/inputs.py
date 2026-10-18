@@ -9,9 +9,11 @@ Teclado, con el juego activo (las teclas no llegan a la app que tenga el foco). 
     flechas arriba/abajo, Intro   strum (en los menús: mover; Intro elige)
     Espacio            menú (pausa)   Retroceso   reiniciar la canción (en los menús: volver)
     Tab                cambiar de dificultad sin parar la canción
+    E                  activar el star power
 En el buscador, letras, números y Espacio escriben (los trastes siguen en la guitarra).
 Siempre: Ctrl+Alt+H mostrar/ocultar (oculto = pausa y teclado libre), Ctrl+Alt+Q salir.
-Guitarra: + menú (pausa), − cambiar de dificultad; en los menús, strum mover, verde o + elegir,
+Guitarra: + menú (pausa), − cambiar de dificultad, levantar el mástil activa el star power (acelerómetro del
+Wiimote, starpower.Tilt); en los menús, strum mover, verde o + elegir,
 rojo o − volver. Si la guitarra se apaga o se enciende más tarde, se reconecta sola.
 Wiimote (donde va enchufada la guitarra): A mostrar/ocultar, 1 canción siguiente, 2 anterior, Home al azar
 (siguiendo a AIMP, siguiente y anterior se las pide a AIMP).
@@ -27,6 +29,7 @@ from ctypes import wintypes
 from dataclasses import dataclass
 
 from . import win32
+from .starpower import Tilt
 
 # (acción, nombre en Ajustes, tecla por defecto, evento que da). Las globales funcionan siempre (también con el
 # juego oculto) y admiten Ctrl/Alt/Mayús/Win; las del juego, solo con el juego a la vista y sin modificadores.
@@ -43,6 +46,7 @@ ACTIONS = [
     ("pause", "Menú (pausa)", "space", ("control", "pause")),
     ("restart", "Reiniciar / volver", "backspace", ("control", "restart")),
     ("difficulty", "Cambiar de dificultad", "tab", ("control", "difficulty")),
+    ("star", "Star power", "e", ("control", "star")),
     ("enter", "Elegir", "enter", ("control", "enter")),
 ]
 GLOBAL_ACTIONS = ("toggle", "quit")
@@ -285,7 +289,7 @@ class GuitarSource:
         try:
             from .wii_guitar import WiiGuitar
 
-            self._guitar = WiiGuitar.open()
+            self._guitar = WiiGuitar.open(accel=True)  # con el acelerómetro: levantar la guitarra
         except Exception as e:  # noqa: BLE001 - sin guitarra se juega con teclado
             self.error = str(e)
             self._guitar = None
@@ -306,7 +310,7 @@ class GuitarSource:
                 self._guitar = None
 
     def _read(self, guitar) -> None:
-        prev = None
+        prev, tilt = None, Tilt()
         while not self._stop.is_set():
             s = guitar.poll(20)
             if s is None:
@@ -327,4 +331,6 @@ class GuitarSource:
                 for mask, name in WIIMOTE_BUTTONS.items():
                     if s.wiimote & mask and not prev.wiimote & mask:
                         self.events.put(InputEvent(now, "control", name))
+            if tilt.feed(s.accel):
+                self.events.put(InputEvent(now, "control", "star"))
             prev = s
