@@ -9,7 +9,7 @@ for a Wii plastic guitar (or the keyboard). The charts are made automatically fr
 
 **English** · [Español](README.es.md)
 
-![Music Hero playing over the desktop](docs/images/gameplay.png)
+![Music Hero playing over the desktop](docs/images/gameplay.jpg)
 
 </div>
 
