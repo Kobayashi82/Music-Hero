@@ -21,4 +21,5 @@ Ver ROADMAP.md para fases y criterios de terminado.
 - Usar una chart humana (Chorus Encore .sng o carpeta): `uv run --project generator generate "<canción.mp3>" --human <chart.sng>`
 - Jugar (fase 3, reproductor propio): `uv run --project app play` (selector de canciones) o `play "<canción.mp3 o carpeta de chart>" [--difficulty hard]`. Récords, dificultad por canción, índice y config en `%APPDATA%/MusicHero/`. Tests de la app: `uv run --project app --with pytest pytest app/tests`
 - Tests (sin GPU): `uv run --project generator --with pytest --with jsonschema pytest tests`
+- Modelo v5 (guitarra + CQT, para los botones): `sh tools/night_v5.sh` prepara, examina y entrena de noche (~6-7 h, GPU; solo cuando el usuario lo diga). Logs en `out/dataset/night_v5_*.log`; no toca out/charts ni models/best.pt. Copia de las charts v4 en `out/charts_backup_v4`. Al acabar: comparar los exámenes v5 y v4 y, si gana v5, copiarlo a models/best.pt y regenerar con `--force`.
 - Música del usuario: `D:\Programas\Multimedia\Musicas` (reproductor: AIMP)
