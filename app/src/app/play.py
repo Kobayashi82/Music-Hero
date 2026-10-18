@@ -4,6 +4,11 @@ Uso:
     uv run --project app play            (abre el selector de canciones, en la última que jugaste)
     uv run --project app play "D:/Programas/Multimedia/Musicas/Queen/Greatest Hits II/Queen - Hammer to Fall.mp3"
     uv run --project app play "out/charts/Queen - Hammer to Fall" --difficulty hard
+    uv run --project app play --hidden   (en segundo plano: Ctrl+Alt+H lo muestra; si suena AIMP, lo sigue)
+
+Con AIMP sonando (al abrir, al mostrarlo con Ctrl+Alt+H o con «Seguir a AIMP» en la pausa), el juego sigue a
+AIMP: su posición es el reloj, cada canción que ponga carga su chart, los saltos en AIMP se respetan y la pausa
+del juego pausa AIMP. Si la canción no tiene chart, la pausa ofrece generarla en segundo plano.
 
 Controles: ver app/inputs.py (A S D F G + flechas, o la guitarra de Wii). + o Espacio abren el menú
 (dificultad, ajustes, calibración); − o Tab cambian de dificultad sin parar. Ctrl+Alt+H muestra/oculta;
@@ -14,9 +19,13 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import os
 import random
+import shutil
 import signal
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -24,8 +33,9 @@ from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QSurfaceFormat
 from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 
-from . import calibration, win32
-from .chart import DIFF_NAMES, DIFFS, Chart, find_chart
+from . import calibration, loopback, win32
+from .aimp import CMD_PAUSE, PLAYING, Aimp, AimpPlayer, Track
+from .chart import DIFF_NAMES, DIFFS, ROOT, Chart, find_chart
 from .config import Config
 from .gameplay import HIT, MISSED, SKIPPED, Game
 from .inputs import Inputs
@@ -50,15 +60,32 @@ LONG_HINT = MENU_HINT + " · Amarillo / Azul: saltar 10"
 POSITIONS = {"left": "Izquierda", "center": "Centro", "right": "Derecha"}
 MENU_REPEAT_S = (0.35, 0.08, 0.035)  # strum mantenido en un menú: espera, repetición y, pasados 2 s, más rápido
 SIDES = {"left": "Izquierda", "right": "Derecha"}
+AIMP_CHECK_S = 0.3  # cada cuánto se mira qué canción tiene AIMP
+OWN_SEEK_S = 0.6  # los saltos que hace el propio juego en AIMP (reiniciar) no cuentan como saltos del usuario
+GENERATE_LOG = ROOT / "out" / "generate_aimp.log"
 
 
 class Session(QObject):
     def __init__(self, chart: Chart, cfg: Config, difficulty: str | None, inputs: Inputs, view: QQuickView,
-                 records: Records | None = None):
+                 records: Records | None = None, aimp: Aimp | None = None):
         super().__init__()
         self.cfg, self.inputs, self.view = cfg, inputs, view
         self.records = records or Records()
-        self.player: Player | None = None
+        self.player: Player | AimpPlayer | None = None
+        self.aimp = aimp or Aimp()
+        self.follow = False  # el juego sigue a AIMP
+        self.aimp_file: str | None = None  # canción de AIMP ya atendida
+        self.aimp_title = ""
+        self.waiting = ""  # siguiendo a AIMP, su canción no tiene chart: el aviso (y no se juega)
+        self.aimp_check = 0.0
+        self.own_seek_until = 0.0
+        self.gen_proc: subprocess.Popen | None = None  # chart generándose en segundo plano
+        self.gen_file, self.gen_name = "", ""
+        self._by_path: dict[str, Entry] | None = None
+        self.synced = False  # retardo de AIMP ya medido desde que se le sigue
+        self.sync_thread: threading.Thread | None = None
+        self.sync_result: tuple[AimpPlayer, float | None] | None = None  # lo deja el hilo de la medida
+        self.sync_retry_at = 0.0
         self._tree: dict[str, dict[str, list[Entry]]] | None = None
         self.held = [False] * 5
         self.flash_t = [0.0] * 5
@@ -80,11 +107,11 @@ class Session(QObject):
         self.record_toast = False  # ya se avisó de que se ha superado el récord en esta partida
         self.load_song(chart, difficulty)
 
-    def load_song(self, chart: Chart, difficulty: str | None = None) -> None:
-        """Pone esta canción (al empezar o desde el selector): su dificultad es la pedida, la última elegida
-        en ella o la de por defecto."""
+    def load_song(self, chart: Chart, difficulty: str | None = None, player: AimpPlayer | None = None) -> None:
+        """Pone esta canción (al empezar, desde el selector o la que suena en AIMP, con player): su dificultad es
+        la pedida, la última elegida en ella o la de por defecto."""
         self.stop_calibration()
-        player = Player(chart.audio_file, self.cfg.audio_offset_ms, LEAD_IN_MS, self.cfg.volume)
+        player = player or Player(chart.audio_file, self.cfg.audio_offset_ms, LEAD_IN_MS, self.cfg.volume)
         if self.player:
             self.player.close()
         self.chart, self.player = chart, player
@@ -98,7 +125,8 @@ class Session(QObject):
         self.flash_t, self.miss_lane_t, self.miss_t = [0.0] * 5, [0.0] * 5, 0.0
         self.records.set_last(chart.audio_sha256)
         self.new_game()
-        self.player.play()
+        if self.player.lead_in:  # el propio; AIMP ya está sonando (o en pausa, como lo haya dejado el usuario)
+            self.player.play()
 
     # ---------- partida ----------
 
@@ -116,10 +144,14 @@ class Session(QObject):
     def restart(self) -> None:
         self.menus.clear()
         self.player.pause()
-        self.player.seek(-LEAD_IN_MS)
+        self.own_seek_until = time.perf_counter() + OWN_SEEK_S
+        self.player.seek(-LEAD_IN_MS if self.player.lead_in else 0)
         self.new_game()
         self.results, self.resume_at = "", None
-        self.player.play()
+        if self.player.lead_in:
+            self.player.play()
+        else:  # AIMP: sin silencio antes del principio, cuenta atrás con la canción parada
+            self.resume_at = time.perf_counter() + RESUME_MS / 1000
 
     def pause(self) -> None:
         self.player.pause()
@@ -153,16 +185,180 @@ class Session(QObject):
 
     def toggle_visible(self) -> None:
         if self.view.isVisible():
-            self.pause()
+            if not self.follow:  # siguiendo a AIMP, la música sigue aunque no se vea el juego
+                self.pause()
             self.inputs.set_game_keys(False)
             self.view.hide()
         else:
+            if self.follow and not self.waiting:
+                self.resync()  # oculto no se pinta ni se juzga: se sigue desde donde va AIMP
+            elif self.aimp.connected() and self.aimp.state() == PLAYING:
+                self.follow_aimp()  # Ctrl+Alt+H con algo sonando en AIMP: a seguirlo
             self.view.show()
             win32.make_click_through(int(self.view.winId()))
             self.inputs.set_game_keys(True)
 
     def toast(self, text: str, seconds: float = TOAST_S) -> None:
         self.toast_text, self.toast_until = text, time.perf_counter() + seconds
+
+    # ---------- AIMP ----------
+
+    def follow_aimp(self) -> bool:
+        """Empieza a seguir a AIMP (si ya lo seguía, nada). False si AIMP no tiene canción."""
+        if self.follow:
+            return True
+        if not self.aimp.connected() or self.aimp.track() is None:
+            return False
+        self.follow, self.aimp_file, self.aimp_check = True, None, 0.0
+        self.synced, self.sync_retry_at = False, 0.0
+        self.menus.clear()
+        self.resume_at = None
+        self.watch_aimp(time.perf_counter())
+        return True
+
+    def resync(self) -> None:
+        """Partida nueva desde donde va la canción (las notas de antes no cuentan, ni la partida para récords)."""
+        pos = self.player.position_ms()
+        self.new_game()
+        if pos > 0:
+            self.game.skip_to(pos + SWITCH_AHEAD_MS)
+            self.partial = True
+
+    def follow_from_menu(self) -> None:
+        if not self.follow_aimp():
+            self.toast("AIMP no tiene ninguna canción puesta")
+        elif not self.waiting:
+            self.player.play()
+
+    def stop_following(self) -> None:
+        if self.follow and self.aimp.state() == PLAYING:
+            self.aimp.command(CMD_PAUSE)  # PAUSE alterna: solo si está sonando
+        self.follow, self.aimp_file, self.waiting = False, None, ""
+
+    def chart_for(self, audio: str) -> Chart | None:
+        """Chart de un archivo de audio: por su ruta en el índice de la biblioteca o, si no está, por su hash."""
+        key = lambda p: os.path.normcase(os.path.abspath(p))  # noqa: E731
+        if self._by_path is None:
+            self._by_path = {key(e.audio): e for e in scan()}
+        e = self._by_path.get(key(audio))
+        if e is not None:
+            folder, path = Path(e.folder), Path(e.audio)
+        else:
+            path = Path(audio)
+            folder = find_chart(path) if path.is_file() else None
+            if folder is None:
+                return None
+        chart = Chart.load(folder)
+        chart.audio_file = path
+        return chart
+
+    def watch_aimp(self, now: float) -> None:
+        """Cada AIMP_CHECK_S: la generación en segundo plano y, siguiendo a AIMP, si ha cambiado de canción."""
+        if now < self.aimp_check:
+            return
+        self.aimp_check = now + AIMP_CHECK_S
+        self.check_generation()
+        if not self.follow:
+            return
+        if not self.aimp.connected():
+            self.stop_following()
+            self.load_song(self.chart)
+            self.pause()
+            self.toast("AIMP se ha cerrado: vuelve el reproductor propio", 5)
+            return
+        track = self.aimp.track()
+        if track is not None and track.file != self.aimp_file:
+            self.aimp_file = track.file
+            self.open_aimp_track(track)
+        self.check_sync(now)
+
+    def check_sync(self, now: float) -> None:
+        """Mide en segundo plano cuánto tarda en oírse AIMP (loopback.py) y ajusta el reloj con lo medido."""
+        if self.sync_result is not None:
+            player, lag = self.sync_result
+            self.sync_result, self.sync_thread = None, None
+            if lag is None:
+                self.sync_retry_at = now + 20  # otro sonido a la vez, un ecualizador...: más tarde
+            elif player is self.player:
+                self.synced = True
+                self.cfg.aimp_offset_ms = round(lag)
+                self.cfg.save()
+                self.apply_offsets()
+                self.toast(f"Sincronizado con AIMP ({lag:+.0f} ms)")
+        player = self.player
+        if (self.synced or self.sync_thread is not None or now < self.sync_retry_at
+                or not isinstance(player, AimpPlayer) or not player.playing or player.position_ms() < 1000):
+            return
+
+        def run() -> None:
+            raw = lambda t: player.position_ms(t) + player.offset_ms  # noqa: E731 - la posición de AIMP, tal cual
+            try:
+                lag = loopback.measure(player.track.file, raw)
+            except Exception as err:  # noqa: BLE001 - sin loopback se sigue con el retardo guardado
+                print(f"medida del retardo de AIMP: {err}")
+                lag = None
+            print(f"retardo de AIMP: {lag:+.0f} ms" if lag is not None else "retardo de AIMP: no se pudo medir")
+            self.sync_result = (player, lag)
+        self.sync_thread = threading.Thread(target=run, daemon=True, name="sincronía")
+        self.sync_thread.start()
+
+    def open_aimp_track(self, track: Track) -> None:
+        self.aimp_title = track.title or Path(track.file).stem
+        try:
+            chart = self.chart_for(track.file)
+        except Exception as err:  # noqa: BLE001 - una chart rota no tira el juego
+            print(f"chart de {track.file}: {err}")
+            chart = None
+        if chart is None:
+            generating = self.gen_proc is not None and self.gen_file == track.file
+            self.waiting = (f"«{self.aimp_title}» no tiene chart todavía"
+                            + (" (generándola…)" if generating else ": + / Espacio para generarla"))
+            self.player.close()  # sin chart no se juega, pero la pausa y el seguir siguen siendo los de AIMP
+            self.player = AimpPlayer(self.aimp, track, self.aimp_offset())
+            return
+        self.waiting = ""
+        player = AimpPlayer(self.aimp, track, self.aimp_offset())
+        self.load_song(chart, player=player)
+        pos = player.position_ms()
+        if pos > 1500:  # empezada a mitad: las notas pasadas no cuentan, y la partida tampoco para récords
+            self.game.skip_to(pos + SWITCH_AHEAD_MS)
+            self.partial = True
+        self.toast(f"AIMP: {chart.artist} – {chart.title} · {DIFF_NAMES[self.difficulty]}")
+
+    def generate_current(self) -> None:
+        """Genera en segundo plano la chart de la canción de AIMP (Demucs, modelo y letra: ~1 min con GPU)."""
+        uv = shutil.which("uv")
+        if self.gen_proc is not None or not self.aimp_file or uv is None:
+            self.toast("Ya se está generando otra" if self.gen_proc else "No se puede generar (¿falta uv?)")
+            return
+        GENERATE_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(GENERATE_LOG, "w", encoding="utf-8") as log:  # el proceso hereda su propia copia
+            flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS
+            env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}  # el del juego no es el del generador
+            self.gen_proc = subprocess.Popen(
+                [uv, "run", "--project", str(ROOT / "generator"), "generate", self.aimp_file],
+                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, creationflags=flags, env=env)
+        self.gen_file, self.gen_name = self.aimp_file, self.aimp_title
+        self.waiting = f"«{self.aimp_title}» no tiene chart todavía (generándola…)"
+        self.resume()
+
+    def check_generation(self) -> None:
+        if self.gen_proc is None or self.gen_proc.poll() is None:
+            return
+        ok = self.gen_proc.returncode == 0
+        self.gen_proc = None
+        self._by_path = self._tree = None  # índice nuevo: ya está la chart
+        current = self.follow and self.aimp_file == self.gen_file
+        if not ok:
+            self.toast(f"No se pudo generar la chart de {self.gen_name} (out/generate_aimp.log)", 8)
+            if current:
+                self.waiting = f"«{self.gen_name}» no tiene chart: falló al generarla"
+            return
+        track = self.aimp.track() if current else None
+        if track is not None and track.file == self.gen_file:
+            self.open_aimp_track(track)
+        else:
+            self.toast(f"Chart de {self.gen_name} lista", 5)
 
     # ---------- menús ----------
 
@@ -264,6 +460,7 @@ class Session(QObject):
         try:
             chart = Chart.load(Path(e.folder))
             chart.audio_file = Path(e.audio)
+            self.stop_following()  # una canción elegida aquí suena en el reproductor propio
             self.load_song(chart)
         except Exception as err:  # noqa: BLE001 - una canción rota no tira el juego
             self.toast(f"No se pudo abrir {e.title}: {err}", 6)
@@ -277,8 +474,14 @@ class Session(QObject):
             self.choose(random.choice(songs))
 
     def pause_menu(self) -> Menu:
+        extra = []
+        if self.waiting and self.gen_proc is None:
+            extra.append(Option("Generar la chart", self.generate_current))
+        if not self.follow and self.aimp.connected() and self.aimp.track() is not None:
+            extra.append(Option("Seguir a AIMP", self.follow_from_menu))
         return Menu("Pausa", [
             Option("Continuar", self.resume),
+            *extra,
             Option("Cambiar canción", self.open_selector),
             Option("Canción al azar", self.play_random),
             Option("Buscar canción", self.open_search),
@@ -288,7 +491,13 @@ class Session(QObject):
             Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
             Option("Calibrar el retardo", self.start_calibration),
             Option("Salir", QGuiApplication.quit),
-        ], body=lambda: f"{self.chart.artist} – {self.chart.title}<br>{self.record_line()}", on_back=self.resume)
+        ], body=self.pause_body, on_back=self.resume)
+
+    def pause_body(self) -> str:
+        if self.waiting:
+            return f"AIMP: {self.waiting}"
+        source = "AIMP · " if self.follow else ""
+        return f"{source}{self.chart.artist} – {self.chart.title}<br>{self.record_line()}"
 
     def results_menu(self) -> Menu:
         return Menu("Fin de la canción", [
@@ -331,8 +540,9 @@ class Session(QObject):
             Option("Volumen", value=lambda: pct(cfg.volume),
                    change=num("volume", 0.1, 0.0, 1.0, lambda: setattr(self.player, "volume", cfg.volume))),
             Option("Retardo del audio", value=lambda: f"{cfg.audio_offset_ms:+.0f} ms",
-                   change=num("audio_offset_ms", 5, -300, 500,
-                              lambda: setattr(self.player, "offset_ms", cfg.audio_offset_ms))),
+                   change=num("audio_offset_ms", 5, -300, 500, self.apply_offsets)),
+            Option("Retardo de AIMP", value=lambda: f"{cfg.aimp_offset_ms:+.0f} ms",
+                   change=num("aimp_offset_ms", 5, -300, 800, self.apply_offsets)),
             Option("Retardo de la imagen", value=lambda: f"{cfg.video_offset_ms:+.0f} ms",
                    change=num("video_offset_ms", 5, -200, 300)),
             Option("Opacidad del fondo", value=lambda: pct(cfg.opacity), change=num("opacity", 0.05, 0.2, 1.0)),
@@ -348,6 +558,14 @@ class Session(QObject):
                                  lambda v: (setattr(cfg, "lyrics", v), cfg.save()))),
             Option("Volver", self.menu_back),
         ], body="Elige una opción para cambiarla con el strum; se guarda sola.")
+
+    def aimp_offset(self) -> float:
+        """Siguiendo a AIMP: su búfer (medido con el loopback) más lo de los altavoces (la calibración)."""
+        return self.cfg.aimp_offset_ms + self.cfg.audio_offset_ms
+
+    def apply_offsets(self) -> None:
+        is_aimp = isinstance(self.player, AimpPlayer)
+        self.player.offset_ms = self.aimp_offset() if is_aimp else self.cfg.audio_offset_ms
 
     def menu_back(self) -> None:
         menu = self.menus[-1]
@@ -399,7 +617,7 @@ class Session(QObject):
 
         def save() -> None:
             self.cfg.audio_offset_ms = new
-            self.player.offset_ms = new
+            self.apply_offsets()
             self.cfg.save()
             self.menus_pop()
             self.toast(f"Retardo del audio: {new:+.0f} ms")
@@ -481,7 +699,7 @@ class Session(QObject):
                 self.restart()
             elif ev.value == "enter":
                 ev.kind, ev.value = "strum", 1
-        if not self.player.playing:
+        if not self.player.playing or self.waiting:
             return
         t = self.player.position_ms(ev.t)
         if ev.kind == "fret":
@@ -516,8 +734,17 @@ class Session(QObject):
             self.strum_hold = (d, since, now + MENU_REPEAT_S[1 if now - since < 2 else 2])
         if self.calib and self.calib.finished:
             self.finish_calibration()
+        self.watch_aimp(now)
+        active = not self.waiting  # siguiendo a AIMP con una canción sin chart no se juega
+        seek = self.player.take_seek()
+        if seek is not None and active and now > self.own_seek_until:  # salto hecho en AIMP
+            self.results = ""
+            self.menus = [m for m in self.menus if m.title != "Fin de la canción"]
+            self.new_game()
+            self.game.skip_to(seek - self.player.offset_ms + SWITCH_AHEAD_MS)
+            self.partial = True
         t = self.player.position_ms(now)
-        if self.player.playing:
+        if self.player.playing and active:
             if self.autoplay:
                 self.play_itself(t)
             self.game.update(t)
@@ -534,15 +761,21 @@ class Session(QObject):
                 for f in lanes:
                     self.miss_lane_t[f] = now
         self.game.events.clear()
-        if not self.results and (self.game.finished and t > self.chart.duration_ms - 500 or self.player.finished):
+        if active and not self.results and (self.game.finished and t > self.chart.duration_ms - 500
+                                            or self.player.finished):
             self.results = self.finish_song()
-            self.player.pause()
-            self.menus = [self.results_menu()]
+            if self.follow:  # AIMP sigue con la siguiente: el resumen, de aviso
+                self.toast(self.results.split("<br>")[0].replace("<b>", "").replace("</b>", ""), 6)
+            else:
+                self.player.pause()
+                self.menus = [self.results_menu()]
 
         travel = TRAVEL_MS / max(0.3, self.cfg.note_speed)
         lyrics = {}
         if self.calib:
             notes, beats = self.calib_notes(now, travel)
+        elif not active:
+            notes, beats = [], []
         else:
             notes, beats = self.song_notes(now, travel)
             if self.cfg.lyrics and self.lyrics:
@@ -568,12 +801,13 @@ class Session(QObject):
             "missFlash": max(0.0, 1 - (now - self.miss_t) / 0.35),
             "missLane": [max(0.0, 1 - (now - mt) / 0.4) for mt in self.miss_lane_t],
             "score": st.score, "streak": st.streak, "mult": st.multiplier, "accuracy": st.accuracy,
-            "title": f"{self.chart.artist} – {self.chart.title}", "difficulty": DIFF_NAMES[self.difficulty],
+            "title": f"AIMP · {self.aimp_title}" if not active else f"{self.chart.artist} – {self.chart.title}",
+            "difficulty": DIFF_NAMES[self.difficulty],
             "autoplay": self.autoplay, "best": self.best_score, "partial": self.partial,
             "progress": max(0.0, min(1.0, t / max(1, self.chart.duration_ms))),
             "countdown": countdown, "menu": menu, "calib": calib,
             "menuHint": (LONG_HINT if self.menus[-1].long else MENU_HINT) if menu else "",
-            "toast": self.toast_text if now < self.toast_until else "",
+            "toast": self.toast_text if now < self.toast_until else (self.waiting if not self.menus else ""),
             "message": self.message, "opacity": self.cfg.opacity, "hwWidth": self.cfg.highway_width,
             "lyricsOn": self.cfg.lyrics, "lyrics": lyrics, "hudSide": self.cfg.hud_side,
         }
@@ -736,6 +970,7 @@ def main() -> int:
     parser.add_argument("--screenshot-at", type=float, default=8.0)
     parser.add_argument("--screenshot-menu", action="store_true", help="con --screenshot: abre el menú antes")
     parser.add_argument("--autoplay", action="store_true", help="modo automático: el juego toca solo")
+    parser.add_argument("--hidden", action="store_true", help="empezar oculto (Ctrl+Alt+H lo muestra)")
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     args = parser.parse_args()
 
@@ -766,10 +1001,15 @@ def main() -> int:
     inputs.set_game_keys(True)
     for e in inputs.errors:
         print("aviso:", e)
-    bridge.session = Session(chart, cfg, args.difficulty, inputs, view, records)
-    bridge.session.set_autoplay(args.autoplay)
-    if not args.song:
-        bridge.session.open_selector()
+    aimp = Aimp()
+    session = bridge.session = Session(chart, cfg, args.difficulty, inputs, view, records, aimp)
+    session.set_autoplay(args.autoplay)
+    if not args.song and not (aimp.connected() and aimp.state() == PLAYING and session.follow_aimp()):
+        session.open_selector()  # si suena AIMP, se le sigue; si no, a elegir canción
+    if args.hidden:
+        if not session.follow:
+            session.pause()
+        inputs.set_game_keys(False)
 
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     keepalive = QTimer()  # deja que Python atienda Ctrl+C
@@ -786,16 +1026,18 @@ def main() -> int:
             QTimer.singleShot(int(args.screenshot_at * 1000) - 300, bridge.session.pause)
         QTimer.singleShot(int(args.screenshot_at * 1000), shot)
 
-    view.show()
-    win32.make_click_through(int(view.winId()))
-    print(f"{chart.artist} - {chart.title} ({DIFF_NAMES[bridge.session.difficulty]}). "
-          "+ / Espacio: menú, − / Tab: dificultad, Ctrl+Alt+H oculta, Ctrl+Alt+Q sale.")
+    if not args.hidden:
+        view.show()
+        win32.make_click_through(int(view.winId()))
+    playing = f"AIMP: {session.aimp_title}" if session.follow else f"{session.chart.artist} - {session.chart.title}"
+    print(f"{playing} ({DIFF_NAMES[session.difficulty]}). "
+          "+ / Espacio: menú, − / Tab: dificultad, Ctrl+Alt+H muestra/oculta, Ctrl+Alt+Q sale.")
     try:
         return app.exec()
     finally:
         inputs.stop()
-        bridge.session.stop_calibration()
-        bridge.session.player.close()
+        session.stop_calibration()
+        session.player.close()
 
 
 if __name__ == "__main__":

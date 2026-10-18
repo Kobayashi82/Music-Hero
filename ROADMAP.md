@@ -153,12 +153,12 @@ Estado (18-10-2026, tarde): ✅ terminada. El usuario ha calibrado y jugado vari
 
 ### Fase 4 – Sincronizar con el reproductor externo
 
-- [ ] AIMP: canción y posición por su API remota; la chart se busca por la ruta del archivo (hash del audio).
+- [x] AIMP: canción y posición por su API remota; la chart se busca por la ruta del archivo en el índice de la biblioteca (si no está, por el hash del audio). `AimpPlayer` (app/aimp.py) da la interfaz del reproductor propio, así que el juego es el mismo.
 - [ ] Resto (navegador, otros reproductores): SMTC; buscar la chart por etiquetas (artista/título) y, si falla, por duración + nombre de archivo.
-- [ ] Interpolar la posición entre actualizaciones con el reloj del sistema (SMTC actualiza poco a menudo).
-- [ ] Ajuste fino: capturar el audio del sistema (WASAPI loopback) unos segundos y alinearlo con la canción procesada (correlación de onsets/croma). Repetir cada X segundos para corregir deriva.
-- [ ] Reaccionar a pausa, salto, cambio de canción.
-- [ ] Atajo global: si la canción no tiene chart, mensaje discreto y opción de generarla en segundo plano.
+- [x] Interpolar la posición entre actualizaciones con el reloj del sistema (AIMP: pasos de ~30 ms, leída cada 4 ms en un hilo). Falta para SMTC.
+- [x] Ajuste fino: al empezar a seguir a AIMP se capturan 2 × 4 s del audio del sistema (WASAPI loopback, `app/loopback.py`) y se buscan en el archivo (correlación): lo que AIMP tarda en hacer sonar su posición. Medido: +231..+248 ms, correlación 1,00. Se guarda («Retardo de AIMP» en Ajustes, también a mano) y se suma a la calibración de los altavoces. Sin deriva (la posición es la del propio AIMP), así que no hace falta repetirlo. `tools/measure_aimp_latency.py` lo mide aparte.
+- [x] Reaccionar a pausa, salto, cambio de canción. La pausa del juego pausa AIMP: PAUSE alterna y tarda ~0,6 s (funde) y PLAY con la canción sonando la reinicia, así que se pide el estado y un hilo lo concilia. Al acabar una canción, el resumen sale de aviso y se sigue con la siguiente de AIMP.
+- [x] Atajo global: con AIMP sonando, Ctrl+Alt+H muestra el juego siguiéndolo (`play --hidden` lo deja esperando). Si la canción no tiene chart, aviso y «Generar la chart» en la pausa: `generate` en segundo plano (sin ventana, prioridad baja, log en out/generate_aimp.log) y se carga sola al acabar.
 
 **Terminado cuando:** pulsas el atajo a mitad de canción en tu reproductor y en menos de 2 s las notas van sincronizadas.
 

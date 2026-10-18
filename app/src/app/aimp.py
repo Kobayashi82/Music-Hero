@@ -1,10 +1,12 @@
 """AIMP por su API remota (ventana "AIMP2_RemoteInfo"): canción, archivo, estado y posición.
 
 AIMP no publica en SMTC. Su posición se actualiza cada ~32 ms en pasos de 30 ms;
-PositionClock la interpola con el reloj del sistema para tener precisión de ms.
+PositionClock la interpola con el reloj del sistema para tener precisión de ms, y AimpPlayer la ofrece
+con la interfaz del reproductor propio (player.Player) para que el juego siga a AIMP.
 """
 
 import ctypes
+import threading
 import time
 from ctypes import wintypes
 from dataclasses import dataclass
@@ -174,3 +176,105 @@ class PositionClock:
             return self.last_pos or 0
         offset = max(p - c * 1000 for c, p in self.changes)
         return int(round(t * 1000 + offset))
+
+
+class AimpPlayer:
+    """El reloj del juego cuando suena AIMP: la interfaz de player.Player (position_ms, playing, play, pause,
+    seek, finished...), con la posición de AIMP interpolada y leída en su hilo cada pocos ms.
+
+    offset_ms: lo que tarda en oírse lo que AIMP dice que está sonando (su búfer de salida, el driver...).
+
+    Pausar y seguir no se mandan a ciegas: en AIMP, PAUSE alterna y tarda ~0,6 s en cambiar el estado (funde
+    el sonido), y PLAY con la canción sonando la empieza de nuevo. Se guarda el estado querido y el hilo manda
+    la orden solo si AIMP no está así y la anterior ya ha tenido tiempo de surtir efecto; para seguir, PAUSE.
+    """
+
+    CMD_WAIT_S = 1.0  # lo que se espera a que una orden se note antes de repetirla
+
+    POLL_S = 0.004
+    END_MS = 400  # a menos de esto del final, la canción se da por acabada
+    lead_in = False  # no hay cuenta atrás en silencio antes del principio: es la canción de AIMP
+
+    def __init__(self, aimp: Aimp, track: Track, offset_ms: float = 0.0):
+        self.aimp, self.track = aimp, track
+        self.offset_ms = offset_ms
+        self.volume = 1.0  # el volumen es cosa de AIMP
+        self.duration_ms = track.duration_ms
+        self.clock = PositionClock(aimp)
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._seek: int | None = None
+        self._want: int | None = None  # PLAYING o PAUSED pedido por el juego; None = lo que haga el usuario
+        self._sent = 0.0  # cuándo se mandó la última orden
+        self.clock.update()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="aimp")
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.POLL_S):
+            with self._lock:
+                self.clock.update()
+                if self.clock.seeked_to is not None:
+                    self._seek, self.clock.seeked_to = self.clock.seeked_to, None
+                self._reconcile()
+
+    def _reconcile(self) -> None:
+        if self._want is None:
+            return
+        state = self.aimp.state()
+        if time.perf_counter() - self._sent < self.CMD_WAIT_S:
+            return  # la última orden aún puede estar surtiendo efecto (el fundido de la pausa)
+        if state == self._want:
+            self._want = None
+        else:
+            if state == PLAYING or (state == PAUSED and self._want == PLAYING):
+                self.aimp.command(CMD_PAUSE)  # alterna: pausa o sigue desde donde estaba
+            elif self._want == PLAYING:  # parada: hay que empezarla
+                self.aimp.command(CMD_PLAY)
+            else:
+                self._want = None  # parada y se quería en pausa: ya no suena
+                return
+            self._sent = time.perf_counter()
+
+    # ---------- control ----------
+
+    def play(self) -> None:
+        self._command(PLAYING)
+
+    def pause(self) -> None:
+        self._command(PAUSED)
+
+    def _command(self, want: int) -> None:
+        with self._lock:
+            self._want = want
+            self._reconcile()
+
+    def toggle(self) -> None:
+        self.pause() if self.playing else self.play()
+
+    @property
+    def playing(self) -> bool:
+        return self.clock.playing and self._want != PAUSED  # pausado ya al pedirlo, aunque AIMP aún funda
+
+    def seek(self, ms: float) -> None:
+        self.aimp.seek(int(max(0, ms)))
+
+    def take_seek(self) -> int | None:
+        """Posición a la que se ha saltado desde AIMP desde la última llamada (None si no)."""
+        with self._lock:
+            s, self._seek = self._seek, None
+        return s
+
+    @property
+    def finished(self) -> bool:
+        return self.duration_ms > 0 and (self.clock.last_pos or 0) >= self.duration_ms - self.END_MS
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=0.5)
+
+    # ---------- reloj ----------
+
+    def position_ms(self, at: float | None = None) -> float:
+        with self._lock:
+            return self.clock.estimate(at) - self.offset_ms

@@ -22,6 +22,7 @@ class Config:
     volume: float = 1.0
     lyrics: bool = True  # letra bajo la autopista (sube la autopista para dejarle sitio)
     hud_side: str = "right"  # marcador a la izquierda o a la derecha de la autopista
+    aimp_offset_ms: float = 230.0  # lo que AIMP tarda en hacer sonar su posición (su búfer); el juego lo mide solo
 
     @classmethod
     def load(cls) -> Config:

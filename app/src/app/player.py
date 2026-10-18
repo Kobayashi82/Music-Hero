@@ -43,6 +43,8 @@ def read_audio(path: Path) -> tuple[np.ndarray, int]:
 
 
 class Player:
+    lead_in = True  # empieza con una cuenta atrás en silencio (posición negativa)
+
     def __init__(self, source: Path | tuple[np.ndarray, int], offset_ms: float = 0.0, lead_in_ms: float = 2000.0,
                  volume: float = 1.0):
         """source: archivo de audio o (muestras float32, frecuencia)."""
@@ -87,6 +89,9 @@ class Player:
         with self._lock:
             self._frame = int(ms / 1000 * self.sr)
             self._anchor = None
+
+    def take_seek(self) -> int | None:
+        return None  # los saltos los hace el propio juego (en AIMP los puede hacer el usuario)
 
     @property
     def finished(self) -> bool:
