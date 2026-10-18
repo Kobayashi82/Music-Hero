@@ -171,6 +171,24 @@ Estado (18-10-2026): primera versión jugable; el usuario la ha probado con la g
 - [ ] Icono en la bandeja con ajustes, biblioteca y estado del procesado.
 - [ ] Estadísticas por canción, temas visuales, star power.
 
+### Fase 7 – Distribución
+
+Que otros usuarios lo usen sin tocar nada: los modelos sacan solos chart y letra, sin ajustes a mano.
+
+- [ ] Motor de generación como proceso aparte: cola persistente, progreso por líneas JSON en stdout, la app lo lanza y lo vigila (si se cae o se queda sin VRAM, el juego sigue).
+- [ ] Biblioteca: elegir carpetas, buscar la música (y vigilar las nuevas), generar chart y letra en segundo plano. Primero la canción que elige el usuario; el resto a baja prioridad y en pausa mientras se juega. Progreso (cola, %, canción actual) en Ajustes.
+- [ ] Ocultar la guitarra no cierra la app: queda en la bandeja (enlaza con la Fase 6).
+- [ ] App como instalador: PyInstaller en modo carpeta (no onefile: arranque lento y falsos positivos de antivirus) + Inno Setup, ~200 MB, sin torch.
+- [ ] El motor no va en el instalador: se descarga la primera vez que se añade una carpeta. La app lleva `uv.exe` y el lockfile del generador y lo instala en `%LOCALAPPDATA%/MusicHero/engine`, con torch CUDA o CPU según la GPU que encuentre.
+- [ ] Modelos descargados al primer uso a la misma carpeta (Demucs, Beat This!, Whisper, OnsetNet), con progreso y reanudación.
+- [ ] OnsetNet en Hugging Face con model card. Licencia no comercial por prudencia (entrenado con charts de la comunidad); nunca subir charts ni audio. Antes de presentarlo como mejor, medirlo con el banco de la Fase 5 frente a Fretformer/Autochart.
+- [ ] Charts de Encore descargadas por la app: revisar sus condiciones antes de activarlo para otros usuarios.
+- [ ] Emparejar la guitarra de Wii desde la propia app (`pair_wiimote.py`).
+- [ ] Sin NVIDIA: en CPU son varios minutos por canción. Más adelante, OnsetNet y Demucs a ONNX con DirectML (AMD e Intel) y faster-whisper para la letra; si sale bien, el motor deja de necesitar torch y pesa mucho menos.
+- [ ] Ejecutable sin firmar: SmartScreen avisará; valorar firma de código.
+
+**Terminado cuando:** en un Windows limpio (otro PC o máquina virtual), instalar, añadir una carpeta y jugar una canción con chart y letra generadas sin abrir una consola.
+
 ## Riesgos y límites
 
 | Riesgo | Por qué pasa | Plan |
