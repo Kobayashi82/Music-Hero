@@ -29,6 +29,7 @@ from .gameplay import HIT, MISSED, SKIPPED, Game
 from .inputs import Inputs
 from .menu import Menu, Option, cycler, stepper
 from .player import Player
+from .sprites import SpriteProvider
 
 QML = Path(__file__).with_name("qml") / "Highway.qml"
 TRAVEL_MS = 1200.0  # del horizonte a la línea de golpeo con note_speed = 1
@@ -133,10 +134,15 @@ class Session(QObject):
         return Option("Dificultad", value=lambda: DIFF_NAMES[self.difficulty],
                       change=cycler(avail, lambda: self.difficulty, self.set_difficulty))
 
+    def autoplay_option(self) -> Option:
+        return Option("Modo automático", value=lambda: "Sí" if self.autoplay else "No",
+                      change=cycler([False, True], lambda: self.autoplay, lambda v: setattr(self, "autoplay", v)))
+
     def pause_menu(self) -> Menu:
         return Menu("Pausa", [
             Option("Continuar", self.resume),
             self.difficulty_option(),
+            self.autoplay_option(),
             Option("Reiniciar", self.restart),
             Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
             Option("Calibrar el retardo", self.start_calibration),
@@ -147,6 +153,7 @@ class Session(QObject):
         return Menu("Fin de la canción", [
             Option("Otra vez", self.restart),
             self.difficulty_option(),
+            self.autoplay_option(),
             Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
             Option("Calibrar el retardo", self.start_calibration),
             Option("Salir", QGuiApplication.quit),
@@ -186,8 +193,6 @@ class Session(QObject):
                    change=num("highway_width", 40, 320, 1200, self.place)),
             Option("Posición", value=lambda: POSITIONS.get(cfg.position, cfg.position),
                    change=cycler(list(POSITIONS), lambda: cfg.position, set_position)),
-            Option("Tocar solo (demo)", value=lambda: "Sí" if self.autoplay else "No",
-                   change=cycler([False, True], lambda: self.autoplay, lambda v: setattr(self, "autoplay", v))),
             Option("Volver", self.menu_back),
         ], body="Elige una opción para cambiarla con el strum; se guarda sola.")
 
@@ -430,7 +435,7 @@ class Session(QObject):
         return notes, beats
 
     def play_itself(self, t: float) -> None:
-        """Demo (--autoplay): toca cada nota a su tiempo y mantiene los trastes hasta la siguiente."""
+        """Modo automático: toca cada nota a su tiempo y mantiene los trastes hasta la siguiente."""
         g = self.game
         while g.next < len(g.notes) and g.notes[g.next].note.time_ms <= t:
             ns = g.notes[g.next]
@@ -479,6 +484,7 @@ def make_view(cfg: Config, bridge: Bridge) -> QQuickView:
     view.setProperty("_q_showWithoutActivating", True)
     place_view(view, cfg)
     view.rootContext().setContextProperty("bridge", bridge)
+    view.engine().addImageProvider("sprites", SpriteProvider())
     view.setSource(QUrl.fromLocalFile(str(QML)))
     for err in view.errors():
         print("QML:", err.toString())
@@ -507,7 +513,7 @@ def main() -> int:
     parser.add_argument("--screenshot", type=Path, help="guarda una captura a los N s (--screenshot-at) y sale")
     parser.add_argument("--screenshot-at", type=float, default=8.0)
     parser.add_argument("--screenshot-menu", action="store_true", help="con --screenshot: abre el menú antes")
-    parser.add_argument("--autoplay", action="store_true", help="demo: el juego toca solo (para probar la vista)")
+    parser.add_argument("--autoplay", action="store_true", help="modo automático: el juego toca solo")
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     args = parser.parse_args()
 

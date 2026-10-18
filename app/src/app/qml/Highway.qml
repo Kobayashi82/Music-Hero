@@ -26,6 +26,12 @@ Item {
     readonly property int beatPool: 32
     readonly property int stride: 7
     readonly property real glowU: 0.15  // hasta dónde sube la luz del carril pulsado (un tercio de la autopista)
+    // sprites (app/sprites.py, lienzo 256 x 160 con la cara de 180 x 82 centrada en y = 75): proporción del
+    // lienzo, cuánto más ancho es que la cara (el resto es halo) y dónde cae el centro de la cara
+    readonly property real gemAspect: 160 / 256
+    readonly property real gemScale: 256 / 180
+    readonly property real faceY: 75 / 160
+    function sprite(id) { return "image://sprites/" + id }
     readonly property bool menuOpen: f.menu !== undefined && f.menu.title !== undefined
     readonly property bool calibrating: f.calib !== undefined && f.calib.total !== undefined
 
@@ -57,23 +63,37 @@ Item {
             PathLine { x: root.xAt(-0.5, 1); y: root.horizonY }
         }
     }
-    Repeater {  // carril iluminado mientras se pulsa su traste
+    Repeater {  // luz del carril pulsado: tres capas (ancha y tenue -> estrecha y clara) para bordes suaves
         model: 5
-        Shape {
+        Item {
+            id: beam
             anchors.fill: parent
+            readonly property int lane: index
+            readonly property color col: root.colors[index]
             opacity: root.f.held[index] ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 60 } }
-            ShapePath {
-                strokeWidth: 0; strokeColor: "transparent"
-                fillGradient: LinearGradient {
-                    y1: root.yAt(root.glowU); y2: root.strikeY
-                    GradientStop { position: 0; color: "transparent" }
-                    GradientStop { position: 1; color: Qt.alpha(root.colors[index], 0.28) }
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: 70 } }
+            Repeater {
+                model: [[0.5, 1.0, 0.2], [0.32, 0.8, 0.26], [0.13, 0.55, 0.5]]  // medio ancho, alto, alpha
+                Shape {
+                    id: layer
+                    anchors.fill: parent
+                    readonly property real hw: modelData[0]
+                    readonly property real topU: root.glowU * modelData[1]
+                    ShapePath {
+                        strokeWidth: 0; strokeColor: "transparent"
+                        fillGradient: LinearGradient {
+                            y1: root.yAt(layer.topU); y2: root.strikeY
+                            GradientStop { position: 0; color: "transparent" }
+                            GradientStop { position: 0.7; color: Qt.alpha(Qt.lighter(beam.col, 1.0 + index * 0.25), modelData[2] * 0.6) }
+                            GradientStop { position: 1; color: Qt.alpha(Qt.lighter(beam.col, 1.0 + index * 0.25), modelData[2]) }
+                        }
+                        startX: root.xAt(beam.lane - layer.hw, layer.topU); startY: root.yAt(layer.topU)
+                        PathLine { x: root.xAt(beam.lane + layer.hw, layer.topU); y: root.yAt(layer.topU) }
+                        PathLine { x: root.xAt(beam.lane + layer.hw, 0); y: root.strikeY }
+                        PathLine { x: root.xAt(beam.lane - layer.hw, 0); y: root.strikeY }
+                    }
                 }
-                startX: root.xAt(index - 0.5, root.glowU); startY: root.yAt(root.glowU)
-                PathLine { x: root.xAt(index + 0.5, root.glowU); y: root.yAt(root.glowU) }
-                PathLine { x: root.xAt(index + 0.5, 0); y: root.strikeY }
-                PathLine { x: root.xAt(index - 0.5, 0); y: root.strikeY }
             }
         }
     }
@@ -122,38 +142,48 @@ Item {
     }
 
     // ---------- línea de golpeo ----------
+    Rectangle {  // halo de la línea
+        x: root.xAt(-0.5, 0); width: root.xAt(4.5, 0) - x; y: root.strikeY - 7; height: 14; radius: 7
+        color: Qt.tint("#18ffffff", Qt.rgba(1, 0.12, 0.12, root.f.missFlash * 0.5))
+    }
     Rectangle {
-        x: root.xAt(-0.5, 0); width: root.xAt(4.5, 0) - x; y: root.strikeY - 2; height: 4
+        x: root.xAt(-0.5, 0); width: root.xAt(4.5, 0) - x; y: root.strikeY - 1.5; height: 3
         color: Qt.tint("#bbffffff", Qt.rgba(1, 0.12, 0.12, root.f.missFlash * 0.85))
     }
-    Repeater {
+    Repeater {  // botones de la línea de golpeo: se hunden y se encienden al pulsar; tiemblan al fallar
         model: 5
         Item {
             id: strikeBtn
-            readonly property real w: root.laneW * 0.84
-            readonly property color col: root.colors[index]
-            readonly property bool down: root.f.held[index]
+            readonly property real w: root.laneW * 0.96 * root.gemScale
+            readonly property real h: w * root.gemAspect
+            readonly property real cx: root.xAt(index, 0)
             readonly property real miss: root.f.missLane[index]
-            x: root.xAt(index, 0) - w / 2 + Math.sin(root.f.time * 70) * miss * root.laneW * 0.05
-            y: root.strikeY - w * 0.3; width: w; height: w * 0.6
-            Rectangle {  // destello al acertar
-                anchors.centerIn: parent; width: parent.width * 1.7; height: parent.height * 2.2; radius: height / 2
-                color: parent.col; opacity: root.f.flash[index] * 0.6
-                scale: 1 + (1 - root.f.flash[index]) * 0.4
+            readonly property real flash: root.f.flash[index]
+            anchors.fill: parent
+            Image {  // halo rojo al fallar
+                visible: strikeBtn.miss > 0.01
+                source: root.sprite("glow/1"); smooth: true
+                width: strikeBtn.w * 1.15; height: width * 0.5
+                x: strikeBtn.cx - width / 2; y: root.strikeY - height / 2; opacity: strikeBtn.miss * 0.9
             }
-            Rectangle {
-                anchors.fill: parent; radius: height / 2
-                color: parent.down ? parent.col : Qt.rgba(0, 0, 0, 0.55)
-                border.color: parent.down ? "white" : parent.col; border.width: 4
+            Image {
+                source: root.sprite("fret/" + index + "/" + (root.f.held[index] ? "down" : "up"))
+                smooth: true; mipmap: true
+                width: strikeBtn.w; height: strikeBtn.h
+                x: strikeBtn.cx - width / 2 + Math.sin(root.f.time * 70) * strikeBtn.miss * root.laneW * 0.06
+                y: root.strikeY - height * root.faceY
             }
-            Rectangle {
-                anchors.centerIn: parent; width: parent.width * 0.5; height: parent.height * 0.5; radius: height / 2
-                color: parent.down ? "white" : Qt.alpha(parent.col, 0.35)
+            Image {  // destello al acertar, encima del botón
+                visible: strikeBtn.flash > 0.01
+                source: root.sprite("glow/" + index); smooth: true
+                width: strikeBtn.w * (0.95 + 0.6 * (1 - strikeBtn.flash)); height: width * 0.5
+                x: strikeBtn.cx - width / 2; y: root.strikeY - height / 2; opacity: strikeBtn.flash
             }
-            Rectangle {  // fallo
-                anchors.fill: parent; radius: height / 2; visible: parent.miss > 0.01
-                color: Qt.rgba(0.9, 0.05, 0.05, parent.miss * 0.55); border.color: Qt.rgba(1, 0.3, 0.3, parent.miss)
-                border.width: 4
+            Image {  // y un fogonazo blanco más corto en el centro
+                visible: strikeBtn.flash > 0.5
+                source: root.sprite("glow/white"); smooth: true
+                width: strikeBtn.w * 0.6; height: width * 0.45
+                x: strikeBtn.cx - width / 2; y: root.strikeY - height / 2; opacity: (strikeBtn.flash - 0.5) * 2
             }
         }
     }
@@ -176,122 +206,75 @@ Item {
             readonly property color col: state === 2 ? "#6a6a6a" : root.colors[lane]
             visible: used
 
-            Shape {  // cola del sustain
+            Shape {  // cola del sustain: halo, banda de color y núcleo (blanco mientras se mantiene)
                 id: tail
                 anchors.fill: parent
                 visible: gem.uEnd > gem.u + 0.001
                 readonly property real u0: gem.sustaining ? 0 : gem.u
-                readonly property real wk: gem.sustaining ? 0.34 : 0.26
+                readonly property real wk: gem.sustaining ? 0.3 : 0.24
                 readonly property real w0: root.laneW * wk * root.s(u0)
                 readonly property real w1: root.laneW * wk * root.s(gem.uEnd)
+                readonly property real live: gem.state === 2 ? 0.45 : 1
                 ShapePath {
                     strokeWidth: 0; strokeColor: "transparent"
-                    fillColor: Qt.rgba(gem.col.r, gem.col.g, gem.col.b, gem.sustaining ? 1 : 0.7)
+                    fillColor: Qt.rgba(gem.col.r, gem.col.g, gem.col.b, (gem.sustaining ? 0.3 : 0.16) * tail.live)
+                    startX: root.xAt(gem.lane, tail.u0) - tail.w0; startY: root.yAt(tail.u0)
+                    PathLine { x: root.xAt(gem.lane, tail.u0) + tail.w0; y: root.yAt(tail.u0) }
+                    PathLine { x: root.xAt(gem.lane, gem.uEnd) + tail.w1; y: root.yAt(gem.uEnd) }
+                    PathLine { x: root.xAt(gem.lane, gem.uEnd) - tail.w1; y: root.yAt(gem.uEnd) }
+                }
+                ShapePath {
+                    strokeWidth: 0; strokeColor: "transparent"
+                    fillColor: Qt.rgba(gem.col.r, gem.col.g, gem.col.b, 0.85 * tail.live)
                     startX: root.xAt(gem.lane, tail.u0) - tail.w0 / 2; startY: root.yAt(tail.u0)
                     PathLine { x: root.xAt(gem.lane, tail.u0) + tail.w0 / 2; y: root.yAt(tail.u0) }
                     PathLine { x: root.xAt(gem.lane, gem.uEnd) + tail.w1 / 2; y: root.yAt(gem.uEnd) }
                     PathLine { x: root.xAt(gem.lane, gem.uEnd) - tail.w1 / 2; y: root.yAt(gem.uEnd) }
                 }
-                ShapePath {  // brillo central mientras se mantiene
+                ShapePath {
                     strokeWidth: 0; strokeColor: "transparent"
-                    fillColor: gem.sustaining ? "#ccffffff" : "transparent"
+                    fillColor: gem.sustaining ? "#f0ffffff" : Qt.rgba(Math.min(1, gem.col.r + 0.4), Math.min(1, gem.col.g + 0.4),
+                                                                   Math.min(1, gem.col.b + 0.4), 0.7 * tail.live)
                     startX: root.xAt(gem.lane, tail.u0) - tail.w0 / 6; startY: root.yAt(tail.u0)
                     PathLine { x: root.xAt(gem.lane, tail.u0) + tail.w0 / 6; y: root.yAt(tail.u0) }
                     PathLine { x: root.xAt(gem.lane, gem.uEnd) + tail.w1 / 6; y: root.yAt(gem.uEnd) }
                     PathLine { x: root.xAt(gem.lane, gem.uEnd) - tail.w1 / 6; y: root.yAt(gem.uEnd) }
                 }
             }
-            Item {  // la nota: base oscura (canto) + cara de color + brillo; los HOPO, más planos y con aro blanco
+            Item {  // la nota (sprite); los HOPO llevan además un halo blanco
                 visible: gem.state !== 1
-                readonly property real sc: root.s(gem.u)
-                readonly property real w: root.laneW * (gem.hopo ? 0.7 : 0.84) * sc
-                x: root.xAt(gem.lane, gem.u) - w / 2; y: root.yAt(gem.u) - w * 0.32
-                width: w; height: w * (gem.hopo ? 0.5 : 0.58)
-                readonly property bool tap: gem.hopo && gem.state !== 2
-                Rectangle {  // halo de los HOPO: se tocan sin strum
-                    visible: parent.tap
-                    anchors.centerIn: parent; width: parent.width * 1.3; height: parent.height * 1.6; radius: height / 2
-                    color: Qt.alpha(Qt.lighter(gem.col, 1.6), 0.4)
+                readonly property real w: root.laneW * 0.88 * root.gemScale * root.s(gem.u)
+                readonly property real h: w * root.gemAspect
+                x: root.xAt(gem.lane, gem.u) - w / 2; y: root.yAt(gem.u) - h * root.faceY
+                width: w; height: h
+                Image {
+                    visible: gem.hopo && gem.state !== 2
+                    source: root.sprite("glow/white"); smooth: true
+                    width: parent.w * 1.0; height: parent.h * 1.1
+                    x: (parent.w - width) / 2; y: parent.h * root.faceY - height / 2; opacity: 0.5
                 }
-                Rectangle {  // canto
-                    anchors.fill: parent; anchors.topMargin: parent.height * 0.18; radius: height / 2
-                    color: Qt.darker(gem.col, 2.2); border.color: "#cc000000"; border.width: Math.max(1, 2 * parent.sc)
-                }
-                Rectangle {  // cara (HOPO: blanca con aro grueso del color del carril)
-                    id: face
-                    readonly property bool tap: parent.tap
-                    width: parent.width; height: parent.height * 0.84; radius: height / 2
-                    border.color: tap ? gem.col : Qt.darker(gem.col, 1.5)
-                    border.width: tap ? Math.max(2, height * 0.2) : Math.max(1, 2 * parent.sc)
-                    gradient: Gradient {
-                        GradientStop { position: 0; color: face.tap ? "white" : Qt.lighter(gem.col, 1.35) }
-                        GradientStop { position: 1; color: face.tap ? Qt.tint(gem.col, "#b0ffffff") : gem.col }
-                    }
-                }
-                Rectangle {  // centro
-                    x: parent.width * 0.3; width: parent.width * 0.4
-                    y: parent.height * 0.22; height: parent.height * 0.4; radius: height / 2
-                    visible: !parent.tap
-                    color: "#bbffffff"
-                    border.color: Qt.darker(gem.col, 1.3); border.width: Math.max(1, parent.sc)
+                Image {
+                    anchors.fill: parent; smooth: true; mipmap: true
+                    source: root.sprite("gem/" + gem.lane + "/" + (gem.state === 2 ? "miss" : gem.hopo ? "hopo" : "normal"))
                 }
             }
         }
     }
 
     // ---------- llamas ----------
-    Repeater {  // al acertar, y mientras suena un sustain: tres lenguas de fuego del color del carril
+    Repeater {  // al acertar (y mientras suena un sustain): fuego del color del carril, animado por fotogramas
         model: 5
-        Item {
-            id: flame
-            anchors.fill: parent
+        Image {
             readonly property real level: Math.max(root.f.flash[index],
-                                                   root.f.burn[index] ? 0.55 + 0.08 * Math.sin(root.f.time * 23 + index) : 0)
-            readonly property color col: root.colors[index]
-            readonly property real cx: root.xAt(index, 0)
-            readonly property real base: root.strikeY + root.laneW * 0.08
-            readonly property real fw: root.laneW * 0.66
-            readonly property int lane: index
+                                                   root.f.burn[index] ? 0.6 + 0.08 * Math.sin(root.f.time * 23 + index) : 0)
+            readonly property int frame: Math.floor(root.f.time * 22 + index * 1.7) % 6
             visible: level > 0.02
-            opacity: Math.min(1, level * 1.5)
-            Repeater {
-                model: 3  // izquierda, centro (la más alta), derecha
-                Shape {
-                    id: tongue
-                    anchors.fill: parent
-                    readonly property real side: index - 1
-                    readonly property real flick: 1 + 0.2 * Math.sin(root.f.time * (17 + 6 * index) + index * 2.1 + flame.lane)
-                    readonly property real h: root.laneW * (index === 1 ? 1.9 : 1.1) * flame.level * flick
-                    readonly property real bw: flame.fw * (index === 1 ? 0.6 : 0.42)
-                    readonly property real x0: flame.cx + side * flame.fw * 0.26
-                    readonly property real sway: root.laneW * 0.07 * Math.sin(root.f.time * 9 + index * 1.7 + flame.lane)
-                    ShapePath {
-                        strokeWidth: 0; strokeColor: "transparent"
-                        fillGradient: LinearGradient {
-                            x1: tongue.x0; y1: flame.base; x2: tongue.x0; y2: flame.base - tongue.h
-                            GradientStop { position: 0; color: "white" }
-                            GradientStop { position: 0.28; color: Qt.lighter(flame.col, 1.5) }
-                            GradientStop { position: 0.65; color: Qt.alpha(flame.col, 0.85) }
-                            GradientStop { position: 1; color: Qt.alpha(flame.col, 0) }
-                        }
-                        startX: tongue.x0 - tongue.bw / 2; startY: flame.base
-                        PathCubic {
-                            x: tongue.x0 + tongue.sway; y: flame.base - tongue.h
-                            control1X: tongue.x0 - tongue.bw / 2; control1Y: flame.base - tongue.h * 0.45
-                            control2X: tongue.x0 + tongue.sway - tongue.bw * 0.1; control2Y: flame.base - tongue.h * 0.75
-                        }
-                        PathCubic {
-                            x: tongue.x0 + tongue.bw / 2; y: flame.base
-                            control1X: tongue.x0 + tongue.sway + tongue.bw * 0.1; control1Y: flame.base - tongue.h * 0.75
-                            control2X: tongue.x0 + tongue.bw / 2; control2Y: flame.base - tongue.h * 0.45
-                        }
-                        PathQuad {
-                            x: tongue.x0 - tongue.bw / 2; y: flame.base
-                            controlX: tongue.x0; controlY: flame.base + tongue.bw * 0.35
-                        }
-                    }
-                }
-            }
+            source: root.sprite("flame/" + index + "/" + frame); smooth: true
+            width: root.laneW * 1.1 * (1 + 0.05 * Math.sin(root.f.time * 31 + index))
+            height: width * 2 * (0.45 + 0.55 * level)
+            x: root.xAt(index, 0) - width / 2
+            y: root.strikeY + height * 0.106 - height  // la base del sprite (a 34 de 320 px del borde) en la línea
+            opacity: Math.min(1, level * 1.6)
         }
     }
 
@@ -323,7 +306,7 @@ Item {
                 }
             }
             Text { text: root.f.streak > 0 ? root.f.streak + " seguidas" : " "; color: "white"; font.pixelSize: 18 }
-            Text { text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty + (root.f.autoplay ? " · demo" : "")
+            Text { text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty + (root.f.autoplay ? " · automático" : "")
                    color: "#ccffffff"
                    font.pixelSize: 16 }
         }
