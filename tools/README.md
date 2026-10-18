@@ -20,7 +20,10 @@ uv run --project app python tools/poc_guitar.py
 
 Funciona si: aparecen trastes, strum y palanca, también con el foco en otra app.
 
-**Guitarra de Wii:** la guitarra va enchufada al Wiimote y el Wiimote se empareja por Bluetooth (Configuración → Bluetooth → Agregar dispositivo, con los botones 1+2 pulsados o el botón rojo de sync; si pide PIN, déjalo vacío). El script activa el driver de Wii de SDL; si sale un mando "Nintendo Wii Remote" pero los trastes no responden, prueba con [WiitarThing](https://github.com/Meowmaritus/WiitarThing), que la convierte en un mando de Xbox 360 virtual.
+**Guitarra de Wii** (va enchufada al Wiimote). SDL ve el Wiimote pero no la guitarra, así que se lee por HID:
+
+1. Emparejar (una vez): `uv run --project app python tools/pair_wiimote.py` y pulsar el botón rojo de sync bajo la tapa de las pilas. Windows 11 pide un PIN que no se puede teclear; el script se lo pasa por la API (y borra antes los intentos a medias, que impiden volver a encontrarlo).
+2. Probar: `uv run --project app python tools/poc_wii_guitar.py`. Sale cada cambio (trastes, strum, palanca, Start/Select) con los 6 bytes en crudo de la extensión; también con el foco en otra ventana.
 
 ## 1b. Teclado — `poc_keyboard.py`
 

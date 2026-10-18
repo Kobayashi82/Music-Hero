@@ -45,19 +45,19 @@ Cada fase termina en algo que se puede probar. No se pasa a la siguiente sin cum
 
 Objetivo: quitar las incertidumbres técnicas antes de escribir el proyecto en serio.
 
-- [ ] Guitarra: script que lista mandos con SDL (pygame-ce) e imprime cada botón, el strum y la palanca. Comprobar que se lee **sin que la ventana tenga el foco**. Guitarra de Wii.
-- [ ] Teclado: tocar con el teclado sin foco y sin que las teclas lleguen a la app de debajo.
-- [ ] SMTC: script que imprime título, artista, estado y posición de lo que suena (probar con el reproductor que uses de verdad).
-- [ ] Overlay: ventana transparente, sin bordes, siempre encima y que deja pasar los clics, con un rectángulo moviendo a 60+ fps. Se muestra/oculta con un atajo global.
-- [ ] GPU: Demucs y Basic Pitch funcionando con CUDA en una canción.
+- [x] Guitarra: script que lista mandos con SDL (pygame-ce) e imprime cada botón, el strum y la palanca. Comprobar que se lee **sin que la ventana tenga el foco**. Guitarra de Wii.
+- [x] Teclado: tocar con el teclado sin foco y sin que las teclas lleguen a la app de debajo.
+- [x] SMTC: script que imprime título, artista, estado y posición de lo que suena (probar con el reproductor que uses de verdad).
+- [x] Overlay: ventana transparente, sin bordes, siempre encima y que deja pasar los clics, con un rectángulo moviendo a 60+ fps. Se muestra/oculta con un atajo global.
+- [x] GPU: Demucs y Basic Pitch funcionando con CUDA en una canción.
 
 **Terminado cuando:** los cuatro scripts funcionan en tu PC.
 
-Estado (17-10-2026). Solo falta la guitarra de Wii, scripts en `tools/`, cómo probarlos en `tools/README.md`:
+Estado (18-10-2026): ✅ terminada. Scripts en `tools/`, cómo probarlos en `tools/README.md`:
 
 | Prueba | Script | Resultado |
 | --- | --- | --- |
-| Guitarra | `poc_guitar.py` | Pendiente: falta probar con la guitarra de Wii conectada y la ventana sin foco |
+| Guitarra | `pair_wiimote.py`, `poc_wii_guitar.py` (`poc_guitar.py` para mandos SDL) | ✅ Guitarra de Wii: Windows 11 pide un PIN que no se puede teclear (la dirección Bluetooth del PC en bytes); `pair_wiimote.py` lo pasa por la API. SDL ve el Wiimote pero no la extensión de guitarra ("Unknown Extension"), así que se lee por HID (`app/src/app/wii_guitar.py`, protocolo del Wiimote): trastes, acordes, strum, palanca, Start/Select, ~96 informes/s (cada ~10 ms) y sin foco |
 | Teclado | `poc_keyboard.py` | ✅ Probado con `autotest_input.py` (teclas inyectadas): trastes, acordes, strum y sueltas llegan sin foco, y las teclas del juego no llegan a la app con foco; al desactivar vuelven a escribir |
 | AIMP | `poc_aimp.py` | ✅ Probado con `autotest_aimp.py`: la posición se actualiza cada ~32 ms (pasos de 30 ms) y se desvía del reloj entre -28 y +16 ms; seek reflejado en 3 ms, cambio de pista detectado en 12 ms |
 | SMTC | `poc_smtc.py` | AIMP no publica en SMTC. No bloquea la fase 0 (AIMP va por su API); probar con YouTube cuando toque |
