@@ -47,6 +47,7 @@ Item {
 
     // ---------- autopista ----------
     Shape {
+        preferredRendererType: Shape.CurveRenderer
         anchors.fill: parent
         ShapePath {
             strokeWidth: 0; strokeColor: "transparent"
@@ -76,6 +77,7 @@ Item {
             Repeater {
                 model: [[0.5, 1.0, 0.2], [0.32, 0.8, 0.26], [0.13, 0.55, 0.5]]  // medio ancho, alto, alpha
                 Shape {
+                    preferredRendererType: Shape.CurveRenderer
                     id: layer
                     anchors.fill: parent
                     readonly property real hw: modelData[0]
@@ -98,6 +100,7 @@ Item {
         }
     }
     Shape {  // al fallar: la parte de abajo de la autopista se enciende en rojo y se apaga
+        preferredRendererType: Shape.CurveRenderer
         anchors.fill: parent
         visible: root.f.missFlash > 0.01
         opacity: root.f.missFlash
@@ -117,6 +120,7 @@ Item {
     Repeater {  // separaciones entre carriles
         model: 4
         Shape {
+            preferredRendererType: Shape.CurveRenderer
             anchors.fill: parent
             ShapePath {
                 strokeWidth: 1.5; strokeColor: "#2cffffff"; fillColor: "transparent"
@@ -128,6 +132,7 @@ Item {
     Repeater {  // raíles metálicos a los lados
         model: 2
         Shape {
+            preferredRendererType: Shape.CurveRenderer
             id: rail
             anchors.fill: parent
             readonly property real inner: index === 0 ? -0.5 : 4.5
@@ -223,6 +228,7 @@ Item {
             visible: used
 
             Shape {  // cola del sustain: halo, banda de color y núcleo (blanco mientras se mantiene)
+                preferredRendererType: Shape.CurveRenderer
                 id: tail
                 anchors.fill: parent
                 visible: gem.uEnd > gem.u + 0.001
