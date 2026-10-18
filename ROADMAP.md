@@ -157,7 +157,7 @@ Estado (18-10-2026, tarde): ✅ terminada. El usuario ha calibrado y jugado vari
 ### Fase 4 – Sincronizar con el reproductor externo
 
 - [x] AIMP: canción y posición por su API remota; la chart se busca por la ruta del archivo en el índice de la biblioteca (si no está, por el hash del audio). `AimpPlayer` (app/aimp.py) da la interfaz del reproductor propio, así que el juego es el mismo.
-- [ ] Resto (navegador, otros reproductores): SMTC; buscar la chart por etiquetas (artista/título) y, si falla, por duración + nombre de archivo.
+- [ ] Más adelante (decidido el 18-10-2026: mucho trabajo para lo que se usa; AIMP cubre el caso del usuario): resto (navegador, otros reproductores) por SMTC; buscar la chart por etiquetas (artista/título) y, si falla, por duración + nombre de archivo. Sin archivo y con la posición de SMTC poco precisa, haría falta alinear de forma continua con el loopback (ya hecho para medir AIMP) y, para lo que no esté en la biblioteca, yt-dlp o grabarlo (fase 6).
 - [x] Interpolar la posición entre actualizaciones con el reloj del sistema (AIMP: pasos de ~30 ms, leída cada 4 ms en un hilo). Falta para SMTC.
 - [x] Ajuste fino: al empezar a seguir a AIMP se capturan 2 × 4 s del audio del sistema (WASAPI loopback, `app/loopback.py`) y se buscan en el archivo (correlación): lo que AIMP tarda en hacer sonar su posición. Medido: +231..+248 ms, correlación 1,00. Sin aviso en pantalla (no le dice nada al usuario). Se guarda (Ajustes → Retardo → «De AIMP», también a mano) y se suma a la calibración de los altavoces. Sin deriva (la posición es la del propio AIMP), así que no hace falta repetirlo. `tools/measure_aimp_latency.py` lo mide aparte.
 - [x] Reaccionar a pausa, salto, cambio de canción. La pausa del juego pausa AIMP: PAUSE alterna y tarda ~0,6 s (funde) y PLAY con la canción sonando la reinicia, así que se pide el estado y un hilo lo concilia. Al acabar una canción, el resumen sale de aviso y se sigue con la siguiente de AIMP.
@@ -165,12 +165,16 @@ Estado (18-10-2026, tarde): ✅ terminada. El usuario ha calibrado y jugado vari
 
 **Terminado cuando:** pulsas el atajo a mitad de canción en tu reproductor y en menos de 2 s las notas van sincronizadas.
 
+Estado (18-10-2026): ✅ terminada con AIMP; el usuario lo ha probado (atajo a mitad de canción, sincronizado), y también los botones del Wiimote, el ratón en los menús y Ctrl+Play/Pausa. Otros reproductores (SMTC), más adelante.
+
 ### Fase 5 – Calidad
 
-- [ ] Banco de pruebas: canciones con chart humana de la comunidad → comparar ritmo (notas a tiempo) y forma (movimiento de botones) con la generada.
-- [ ] Ajustar reglas con esa métrica en vez de a ojo.
-- [ ] Editor sencillo para corregir notas a mano (o exportar a Moonscraper y reimportar).
-- [ ] Opcional y más adelante: entrenar un modelo propio con charts humanas como datos.
+- [x] Banco de pruebas: las 92 charts humanas de la biblioteca del usuario, fuera del entrenamiento (out/dataset/feat_library): `tools/eval_model.py` (F1 de inicios ±50 ms por dificultad, Harmonix y comunidad aparte), `tools/eval_frets.py` y `tools/eval_vs_human.py` (botones: exactos, dirección sube/baja, acordes).
+- [x] Ajustar con esa métrica en vez de a ojo: cada modelo y cada cambio del mapeo se decide con el examen (v2 → v3 → v4, Viterbi solo en Experto...).
+- [ ] Editor para corregir notas a mano: descartado por ahora; la idea es que lo hagan los modelos solos (fase 7: para otros usuarios).
+- [x] Entrenar un modelo propio con charts humanas: OnsetNet v1–v4 (ritmo, dificultades y botones; v4 en models/best.pt). v5 (con la pista de guitarra y su CQT, para acertar más los botones) se entrena la noche del 18-10-2026 con `sh tools/night_v5.sh`.
+
+Estado (18-10-2026): falta el resultado de v5 (examen frente a v4) y, si gana, regenerar la biblioteca con él. Después: Demucs para los paquetes sin pista de guitarra, charts de teclado y estilo Neversoft.
 
 ### Fase 6 – Extras
 
