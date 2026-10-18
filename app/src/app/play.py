@@ -530,16 +530,17 @@ class Session(QObject):
             self.leave_option(),
         ], body=lambda: self.results)
 
-    def settings_menu(self) -> Menu:
-        cfg = self.cfg
+    def num(self, name: str, step: float, lo: float, hi: float, after=None):
+        """change() para un ajuste numérico de la config: con paso y límites, y se guarda solo."""
+        def set_(v: float) -> None:
+            setattr(self.cfg, name, v)
+            if after:
+                after()
+            self.cfg.save()
+        return stepper(lambda: getattr(self.cfg, name), set_, step, lo, hi)
 
-        def num(name: str, step: float, lo: float, hi: float, after=None):
-            def set_(v: float) -> None:
-                setattr(cfg, name, v)
-                if after:
-                    after()
-                cfg.save()
-            return stepper(lambda: getattr(cfg, name), set_, step, lo, hi)
+    def settings_menu(self) -> Menu:
+        cfg, num = self.cfg, self.num
 
         def set_position(v) -> None:
             cfg.position = v
@@ -557,12 +558,7 @@ class Session(QObject):
                    change=num("note_speed", 0.1, 0.5, 2.0)),
             Option("Volumen", value=lambda: pct(cfg.volume),
                    change=num("volume", 0.1, 0.0, 1.0, lambda: setattr(self.player, "volume", cfg.volume))),
-            Option("Retardo del audio", value=lambda: f"{cfg.audio_offset_ms:+.0f} ms",
-                   change=num("audio_offset_ms", 5, -300, 500, self.apply_offsets)),
-            Option("Retardo de AIMP", value=lambda: f"{cfg.aimp_offset_ms:+.0f} ms",
-                   change=num("aimp_offset_ms", 5, -300, 800, self.apply_offsets)),
-            Option("Retardo de la imagen", value=lambda: f"{cfg.video_offset_ms:+.0f} ms",
-                   change=num("video_offset_ms", 5, -200, 300)),
+            Option("Retardo", lambda: self.menus.append(self.delay_menu())),
             Option("Opacidad del fondo", value=lambda: pct(cfg.opacity), change=num("opacity", 0.05, 0.2, 1.0)),
             Option("Ancho de la autopista", value=lambda: f"{cfg.highway_width} px",
                    change=num("highway_width", 40, 320, 1200, self.place)),
@@ -577,6 +573,20 @@ class Session(QObject):
                                  lambda v: (setattr(cfg, "lyrics", v), cfg.save()))),
             Option("Volver", self.menu_back),
         ], body="Elige una opción para cambiarla con el strum; se guarda sola.")
+
+    def delay_menu(self) -> Menu:
+        cfg, num = self.cfg, self.num
+        return Menu("Retardo", [
+            Option("Del audio", value=lambda: f"{cfg.audio_offset_ms:+.0f} ms",
+                   change=num("audio_offset_ms", 5, -300, 500, self.apply_offsets)),
+            Option("De AIMP", value=lambda: f"{cfg.aimp_offset_ms:+.0f} ms",
+                   change=num("aimp_offset_ms", 5, -300, 800, self.apply_offsets)),
+            Option("De la imagen", value=lambda: f"{cfg.video_offset_ms:+.0f} ms",
+                   change=num("video_offset_ms", 5, -200, 300)),
+            Option("Volver", self.menu_back),
+        ], body="Audio: lo que tardan en sonar tus altavoces (lo mide «Calibrar el retardo»).<br>"
+                "AIMP: lo que tarda AIMP en hacer sonar su posición (se mide solo al seguirlo).<br>"
+                "Imagen: lo que tarda la pantalla en enseñar las notas.")
 
     def aimp_offset(self) -> float:
         """Siguiendo a AIMP: su búfer (medido con el loopback) más lo de los altavoces (la calibración)."""
