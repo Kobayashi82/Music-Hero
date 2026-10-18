@@ -37,6 +37,24 @@ Item {
     function s(u) { return 1 / (1 + k * Math.max(u, -0.3)) }
     function yAt(u) { return strikeY - (strikeY - horizonY) * (1 - s(u)) / (1 - farScale) }
     function xAt(lane, u) { return width / 2 + (lane - 2) * laneW * s(u) }
+    // Matriz que lleva un rectángulo w x h al cuadrilátero (x0,y0) arriba-izq, (x1,y1) arriba-der,
+    // (x2,y2) abajo-der, (x3,y3) abajo-izq: una homografía (Heckbert), para texturas en perspectiva.
+    function quad(w, h, x0, y0, x1, y1, x2, y2, x3, y3) {
+        var dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3
+        var dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3
+        var g = 0, hh = 0
+        var det = dx1 * dy2 - dx2 * dy1
+        if (Math.abs(det) > 1e-9 && (Math.abs(dx3) > 1e-9 || Math.abs(dy3) > 1e-9)) {
+            g = (dx3 * dy2 - dx2 * dy3) / det
+            hh = (dx1 * dy3 - dx3 * dy1) / det
+        }
+        var a = x1 - x0 + g * x1, b = x3 - x0 + hh * x3
+        var d = y1 - y0 + g * y1, e = y3 - y0 + hh * y3
+        return Qt.matrix4x4(a / w, b / h, 0, x0,
+                            d / w, e / h, 0, y0,
+                            0, 0, 1, 0,
+                            g / w, hh / h, 0, 1)
+    }
     function fmt(n) { return Math.round(n).toLocaleString(Qt.locale("es_ES"), "f", 0) }
 
     FrameAnimation {
@@ -191,36 +209,22 @@ Item {
             readonly property color col: state === 2 ? "#6a6a6a" : root.colors[lane]
             visible: used
 
-            Shape {  // cola del sustain: banda de color (más viva cerca de la línea) y filo central, blanco al mantener
-                preferredRendererType: Shape.CurveRenderer
+            Image {  // cola de la nota larga: textura proyectada en perspectiva sobre el carril
                 id: tail
-                anchors.fill: parent
                 visible: gem.uEnd > gem.u + 0.001
                 readonly property real u0: gem.sustaining ? 0 : gem.u
-                readonly property real wk: gem.sustaining ? 0.3 : 0.24
-                readonly property real w0: root.laneW * wk * root.s(u0)
-                readonly property real w1: root.laneW * wk * root.s(gem.uEnd)
-                readonly property real live: gem.state === 2 ? 0.45 : 1
-                ShapePath {
-                    strokeWidth: 0; strokeColor: "transparent"
-                    fillGradient: LinearGradient {
-                        y1: root.yAt(gem.uEnd); y2: root.yAt(tail.u0)
-                        GradientStop { position: 0; color: Qt.rgba(gem.col.r, gem.col.g, gem.col.b, 0.55 * tail.live) }
-                        GradientStop { position: 1; color: Qt.rgba(gem.col.r, gem.col.g, gem.col.b, (gem.sustaining ? 1 : 0.9) * tail.live) }
-                    }
-                    startX: root.xAt(gem.lane, tail.u0) - tail.w0 / 2; startY: root.yAt(tail.u0)
-                    PathLine { x: root.xAt(gem.lane, tail.u0) + tail.w0 / 2; y: root.yAt(tail.u0) }
-                    PathLine { x: root.xAt(gem.lane, gem.uEnd) + tail.w1 / 2; y: root.yAt(gem.uEnd) }
-                    PathLine { x: root.xAt(gem.lane, gem.uEnd) - tail.w1 / 2; y: root.yAt(gem.uEnd) }
-                }
-                ShapePath {
-                    strokeWidth: 0; strokeColor: "transparent"
-                    fillColor: gem.sustaining ? "#f0ffffff" : Qt.rgba(Math.min(1, gem.col.r + 0.4), Math.min(1, gem.col.g + 0.4),
-                                                                   Math.min(1, gem.col.b + 0.4), 0.7 * tail.live)
-                    startX: root.xAt(gem.lane, tail.u0) - tail.w0 / 6; startY: root.yAt(tail.u0)
-                    PathLine { x: root.xAt(gem.lane, tail.u0) + tail.w0 / 6; y: root.yAt(tail.u0) }
-                    PathLine { x: root.xAt(gem.lane, gem.uEnd) + tail.w1 / 6; y: root.yAt(gem.uEnd) }
-                    PathLine { x: root.xAt(gem.lane, gem.uEnd) - tail.w1 / 6; y: root.yAt(gem.uEnd) }
+                readonly property real wk: gem.sustaining ? 0.5 : 0.42
+                readonly property real w0: root.laneW * wk * root.s(u0) / 2
+                readonly property real w1: root.laneW * wk * root.s(gem.uEnd) / 2
+                source: root.sprite("tail/" + gem.lane + "/" + (gem.state === 2 ? "miss" : gem.sustaining ? "live" : "normal"))
+                smooth: true
+                x: 0; y: 0; width: 64; height: 256
+                transform: Matrix4x4 {
+                    matrix: root.quad(tail.width, tail.height,
+                                      root.xAt(gem.lane, gem.uEnd) - tail.w1, root.yAt(gem.uEnd),
+                                      root.xAt(gem.lane, gem.uEnd) + tail.w1, root.yAt(gem.uEnd),
+                                      root.xAt(gem.lane, tail.u0) + tail.w0, root.yAt(tail.u0),
+                                      root.xAt(gem.lane, tail.u0) - tail.w0, root.yAt(tail.u0))
                 }
             }
             Item {  // la nota (sprite); los HOPO llevan además un halo blanco

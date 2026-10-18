@@ -7,6 +7,8 @@ Ids:
     fret/<carril>/<up|down>            botón de la línea de golpeo (mismo lienzo y cara que las notas)
     flame/<carril>/<0..FLAME_FRAMES-1> acierto: fuego suave, haz de luz y chispas (base abajo en el centro)
     glow/<carril|white>                halo suave redondo (GLOW x GLOW)
+    tail/<carril>/<normal|live|miss>   cola de una nota larga (TAIL_W x TAIL_H; live = mientras se mantiene).
+                                       QML la proyecta en perspectiva sobre el carril (Highway.qml: quad)
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ FACE = QRectF(38, 34, 180, 82)  # elipse de la cara dentro del lienzo (Highway.q
 DEPTH = 16  # grosor de la pieza
 FLAME_W, FLAME_H, FLAME_BASE, FLAME_FRAMES = 160, 320, 34, 6
 GLOW = 256
+TAIL_W, TAIL_H = 64, 256
 SS = 2  # superresolución
 
 
@@ -211,7 +214,7 @@ def draw_gem(lane: int, kind: str) -> QImage:
         _side(p, FACE, DEPTH, _shade(col, 0.8), _shade(col, 0.35))
         _bezel(p, FACE, col)  # aro del color y tapa blanca: se toca sin strum
     else:
-        _side(p, FACE, DEPTH, QColor("#5d616c"), QColor("#16171c"))
+        _side(p, FACE, DEPTH, _shade(col, 0.78), _shade(col, 0.4))  # canto del color: si es oscuro parece sombra
         _bezel(p, FACE, QColor("#7a7e88") if miss else None)
     cap = FACE.adjusted(13, 7, -13, -9)
     lift = 5  # la tapa sobresale un poco del aro
@@ -231,7 +234,7 @@ def draw_fret(lane: int, down: bool) -> QImage:
     lens = face.adjusted(16, 9, -16, -9)
     if down:
         _halo(p, _ellipse(lens.adjusted(-10, -6, 10, 6)), col, 1.4)
-    _side(p, face, DEPTH - press, QColor("#4a4d57"), QColor("#121318"))
+    _side(p, face, DEPTH - press, QColor("#8d929d"), QColor("#40434c"))
     _bezel(p, face)
     p.setPen(QPen(QColor(0, 0, 0, 200), 2))  # hueco del cristal
     p.setBrush(QColor("#08080c"))
@@ -340,6 +343,31 @@ def draw_glow(name: str) -> QImage:
     return img
 
 
+def draw_tail(lane: int, kind: str) -> QImage:
+    """Cola de nota larga, calculada píxel a píxel: color pleno con el centro algo más claro y los bordes
+    difuminados (sin líneas). Mantenida: más luminosa y con un resplandor alrededor. El extremo lejano
+    (arriba) se funde para que no acabe en seco."""
+    col = QColor("#6b6f78") if kind == "miss" else QColor(COLORS[lane])
+    live = kind == "live"
+    x = np.abs(np.linspace(-1, 1, TAIL_W))[None, :]
+    t = np.linspace(0, 1, TAIL_H)[:, None]  # 0 arriba (extremo lejano) .. 1 abajo
+
+    def smooth(e0: float, e1: float, v):
+        k = np.clip((v - e0) / (e1 - e0), 0, 1)
+        return k * k * (3 - 2 * k)
+    body = 1 - smooth(0.4, 0.62, x)  # la banda ocupa el centro; fuera, solo resplandor
+    glow = np.exp(-(x / 0.55) ** 2) * (0.45 if live else 0.18)
+    end = smooth(0.0, 0.05, t)
+    a = np.clip(body * (0.95 if live else 0.82) + glow * (1 - body), 0, 1) * end
+    if kind == "miss":
+        a = a * 0.55
+    lift = np.exp(-(x / 0.32) ** 2) * (0.55 if live else 0.25) * body  # centro más claro, sin borde
+    rgb = np.array([col.redF(), col.greenF(), col.blueF()])[None, None, :]
+    rgb = rgb + (1 - rgb) * lift[..., None]
+    arr = np.ascontiguousarray((np.dstack([rgb * a[..., None], a]) * 255).astype(np.uint8))
+    return QImage(arr.data, TAIL_W, TAIL_H, TAIL_W * 4, QImage.Format.Format_RGBA8888_Premultiplied).copy()
+
+
 def draw(sprite_id: str) -> QImage:
     parts = sprite_id.split("/")
     kind = parts[0]
@@ -351,6 +379,8 @@ def draw(sprite_id: str) -> QImage:
         return draw_flame(int(parts[1]), int(parts[2]) % FLAME_FRAMES)
     if kind == "glow":
         return draw_glow(parts[1])
+    if kind == "tail":
+        return draw_tail(int(parts[1]), parts[2])
     raise KeyError(sprite_id)
 
 
