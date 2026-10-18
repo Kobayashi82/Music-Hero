@@ -8,20 +8,26 @@ from pathlib import Path
 
 from generator.lang_en import EN
 
-SRC = Path(__file__).resolve().parent.parent / "generator" / "src" / "generator"
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "generator" / "src" / "generator"
+TOOLS = [ROOT / "tools" / f for f in ("encore_dataset.py", "eval_model.py", "eval_frets.py", "eval_vs_human.py")]
 
 
 def sources():
-    return [(p, ast.parse(p.read_text(encoding="utf-8"))) for p in SRC.rglob("*.py")]
+    return [(p, ast.parse(p.read_text(encoding="utf-8"))) for p in [*SRC.rglob("*.py"), *TOOLS]]
 
 
 def keys() -> dict[str, str]:
+    from generator.preview import TEMPLATE, UI_TEXT
+
     found = {}
     for path, tree in sources():
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "t" and node.args
                     and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
                 found[node.args[0].value] = f"{path.name}:{node.lineno}"
+    for m in UI_TEXT.finditer(TEMPLATE):  # {{texto}} de la vista previa
+        found[m.group(1)] = "preview.html"
     return found
 
 

@@ -84,4 +84,91 @@ EN: dict[str, str] = {
     "confianza {c:.2f}": "confidence {c:.2f}",
     "{lines} líneas, {words} palabras": "{lines} lines, {words} words",
     "Fin en {mins:.1f} min: {counts}": "Finished in {mins:.1f} min: {counts}",
+
+    # ---------- vista previa (preview.html) ----------
+    "notas": "notes",
+    "acordes": "chords",
+    "dificultad": "difficulty",
+    "Autopista": "Highway",
+    "Línea temporal": "Timeline",
+    "Clic en notas": "Click on notes",
+    "segundos visibles": "visible seconds",
+    "guitarra": "guitar",
+    "otros": "other",
+    "voz": "vocals",
+    "bajo": "bass",
+    "Experto": "Expert",
+    "Difícil": "Hard",
+    "Medio": "Medium",
+    "Fácil": "Easy",
+    "máx": "max",
+    "energía": "energy",
+    "fuente:": "source:",
+    "contorno elegido": "chosen contour",
+    "espacio play · ← → ±5 s · V vista · C clics · clic para saltar":
+        "space play · ← → ±5 s · V view · C clicks · click to jump",
+    "Pausa": "Pause",
+
+    # ---------- entrenamiento (learn/) ----------
+    "fallo {name}: {err}": "failed {name}: {err}",
+    "{done} preparadas ({failed} descartadas), {secs:.1f} s/canción":
+        "{done} prepared ({failed} discarded), {secs:.1f} s/song",
+    "Fin: {done} procesadas, {failed} descartadas": "Done: {done} processed, {failed} discarded",
+    "{name} necesita la pista de guitarra (stems/guitar.flac)": "{name} needs the guitar stem (stems/guitar.flac)",
+    "pocas notas con el umbral {old}, bajado a {new} ({n} notas)":
+        "too few notes at threshold {old}, lowered to {new} ({n} notes)",
+    "pesos iniciales de {name}": "initial weights from {name}",
+    "aprender también los botones de cada nota": "also learn the frets of each note",
+    "empezar desde los pesos de otro modelo (p. ej. models/onset_v3.pt)":
+        "start from another model's weights (e.g. models/onset_v3.pt)",
+    "entrada con la pista de guitarra y su CQT (datos de learn.data --guitar)":
+        "input with the guitar stem and its CQT (data from learn.data --guitar)",
+    "{train} canciones de entrenamiento ({harmonix:.0f} de Harmonix), {val} de validación ({excluded} de la "
+    "biblioteca excluidas)":
+        "{train} training songs ({harmonix:.0f} from Harmonix), {val} for validation ({excluded} from the library "
+        "excluded)",
+    "paso {step}: 50 lotes seguidos con NaN, se para (el mejor modelo ya está en {out})":
+        "step {step}: 50 batches in a row with NaN, stopping (the best model is already in {out})",
+    "{n} lotes saltados por NaN": "{n} batches skipped due to NaN",
+    "paso {step}: pérdida {loss:.4f} ({secs:.2f} s/paso{extra})": "step {step}: loss {loss:.4f} ({secs:.2f} s/step{extra})",
+    "validación:": "validation:",
+    "umbral {th}": "threshold {th}",
+    "botones:": "frets:",
+    "exactos {exact:.0%} dirección {dir:.0%} acordes {pred:.0%}/{ref:.0%}":
+        "exact {exact:.0%} direction {dir:.0%} chords {pred:.0%}/{ref:.0%}",
+    "guardado (puntuación {score:.3f}) -> {out}": "saved (score {score:.3f}) -> {out}",
+
+    # ---------- dataset y exámenes (tools/) ----------
+    "página {page}, {got}/{quota} (total {total})": "page {page}, {got}/{quota} (total {total})",
+    "Catálogo: {n} charts -> {dest}": "Catalog: {n} charts -> {dest}",
+    "Tope de {gb:.0f} GB alcanzado.": "{gb:.0f} GB limit reached.",
+    "{done} bajadas, {failed} fallos, {gb:.1f} GB ({rate:.1f} MB/s)":
+        "{done} downloaded, {failed} failed, {gb:.1f} GB ({rate:.1f} MB/s)",
+    "Fin: {done} bajadas, {failed} fallos, {gb:.1f} GB en {dest}":
+        "Done: {done} downloaded, {failed} failed, {gb:.1f} GB in {dest}",
+    "{n} con chart": "{n} with a chart",
+    "{found}/{total} canciones de la biblioteca con chart humana -> {dest}":
+        "{found}/{total} library songs with a human chart -> {dest}",
+    "reintento en {s} s ({err})": "retrying in {s} s ({err})",
+    "Encore no responde: {path}": "Encore isn't responding: {path}",
+    "{n} canciones": "{n} songs",
+    "nota a nota": "note by note",
+    "exactos {ex:5.1%}  dirección {dir:5.1%}  sube/baja {mv:5.1%}  acordes {cp:5.1%} (humanas {cr:.1%})  repite "
+    "{rp:5.1%} (humanas {rr:.1%})":
+        "exact {ex:5.1%}  direction {dir:5.1%}  up/down {mv:5.1%}  chords {cp:5.1%} (human {cr:.1%})  repeats "
+        "{rp:5.1%} (human {rr:.1%})",
+    "{n} canciones; umbrales del modelo {th}": "{n} songs; model thresholds {th}",
+    "comunidad": "community",
+    "{name} ({n} canciones):": "{name} ({n} songs):",
+    "botones: exactos {exact:.0%}, dirección {dir:.0%}, acordes {pred:.0%} (humanas {ref:.0%})":
+        "frets: exact {exact:.0%}, direction {dir:.0%}, chords {pred:.0%} (human {ref:.0%})",
+    "(precisión {p:.2f}, recall {r:.2f})": "(precision {p:.2f}, recall {r:.2f})",
+    "Experto por canción (notas del modelo / humanas):": "Expert per song (model notes / human):",
+    "mediana por canción: {m:.3f}": "median per song: {m:.3f}",
+    "referencia humana ({diff}): {n} notas, {nps:.2f}/s, acordes {ch:.0%}":
+        "human reference ({diff}): {n} notes, {nps:.2f}/s, chords {ch:.0%}",
+    "candidata": "candidate",
+    "precis.": "precis.",
+    "dirección": "direction",
+    "(desfase {ms} ms)": "(offset {ms} ms)",
 }

@@ -25,6 +25,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from ..i18n import t
 from .data import DIFFS, FPS
 from .model import N_COMBOS, N_MELS, OnsetNet, combo_frets
 
@@ -268,7 +269,7 @@ def init_from(model: OnsetNet, path: Path) -> None:
             own[name].copy_(w)
         else:  # última capa: las salidas nuevas van detrás
             own[name][:w.shape[0]].copy_(w)
-    print(f"pesos iniciales de {path.name}")
+    print(t("pesos iniciales de {name}", name=path.name))
 
 
 def main() -> int:
@@ -280,10 +281,10 @@ def main() -> int:
     ap.add_argument("--length", type=int, default=1536)  # ~18 s
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--eval-every", type=int, default=2000)
-    ap.add_argument("--frets", action="store_true", help="aprender también los botones de cada nota")
-    ap.add_argument("--init", type=Path, help="empezar desde los pesos de otro modelo (p. ej. models/onset_v3.pt)")
+    ap.add_argument("--frets", action="store_true", help=t("aprender también los botones de cada nota"))
+    ap.add_argument("--init", type=Path, help=t("empezar desde los pesos de otro modelo (p. ej. models/onset_v3.pt)"))
     ap.add_argument("--guitar", action="store_true",
-                    help="entrada con la pista de guitarra y su CQT (datos de learn.data --guitar)")
+                    help=t("entrada con la pista de guitarra y su CQT (datos de learn.data --guitar)"))
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
@@ -299,8 +300,9 @@ def main() -> int:
     train, val = songs.split()
     if not val:  # conjuntos diminutos (pruebas): validar con lo que haya
         val = train[:2]
-    print(f"{len(train)} canciones de entrenamiento ({sum(s['style'] for s in train):.0f} de Harmonix), "
-          f"{len(val)} de validación ({len(exclude)} de la biblioteca excluidas)")
+    print(t("{train} canciones de entrenamiento ({harmonix:.0f} de Harmonix), {val} de validación ({excluded} de la "
+            "biblioteca excluidas)", train=len(train), harmonix=sum(s["style"] for s in train), val=len(val),
+            excluded=len(exclude)))
     device = "cuda"
     model = OnsetNet(frets=args.frets, guitar=args.guitar).to(device)
     if args.init:
@@ -333,31 +335,34 @@ def main() -> int:
             skipped += 1
             in_a_row += 1
             if in_a_row >= 50:
-                print(f"paso {step}: 50 lotes seguidos con NaN, se para (el mejor modelo ya está en {args.out})")
+                print(t("paso {step}: 50 lotes seguidos con NaN, se para (el mejor modelo ya está en {out})",
+                        step=step, out=args.out))
                 return 1
         sched.step()
         if step % 200 == 0:
-            extra = f", {skipped} lotes saltados por NaN" if skipped else ""
-            print(f"paso {step}: pérdida {np.mean(running) if running else float('nan'):.4f} "
-                  f"({(time.time() - t0) / step:.2f} s/paso{extra})")
+            extra = ", " + t("{n} lotes saltados por NaN", n=skipped) if skipped else ""
+            print(t("paso {step}: pérdida {loss:.4f} ({secs:.2f} s/paso{extra})", step=step,
+                    loss=np.mean(running) if running else float("nan"), secs=(time.time() - t0) / step, extra=extra))
             running = []
         if step % args.eval_every == 0 or step == args.steps:
             res = evaluate(model, val, device)
             # con botones se guarda el que mejor combina ritmo y botones
             mean = float(np.mean([r["f1"] + r.get("fret_exact", 0.0) for r in res.values()]))
-            print("   validación: " + "  ".join(f"{d} F1 {r['f1']:.3f} (p {r['precision']:.2f} r {r['recall']:.2f} "
-                                                 f"umbral {r['threshold']})" for d, r in res.items()))
+            print("   " + t("validación:") + " " + "  ".join(
+                f"{d} F1 {r['f1']:.3f} (p {r['precision']:.2f} r {r['recall']:.2f} "
+                + t("umbral {th}", th=r["threshold"]) + ")" for d, r in res.items()))
             if args.frets:
-                print("   botones:    " + "  ".join(
-                    f"{d} exactos {r['fret_exact']:.0%} dirección {r['fret_dir']:.0%} "
-                    f"acordes {r['chords_pred']:.0%}/{r['chords_ref']:.0%}" for d, r in res.items()))
+                print("   " + t("botones:") + "    " + "  ".join(
+                    f"{d} " + t("exactos {exact:.0%} dirección {dir:.0%} acordes {pred:.0%}/{ref:.0%}",
+                                exact=r["fret_exact"], dir=r["fret_dir"], pred=r["chords_pred"], ref=r["chords_ref"])
+                    for d, r in res.items()))
             if mean > best_f1:
                 best_f1 = mean
                 torch.save({"model": model.state_dict(), "n_extra": model.n_extra, "frets": model.frets,
                             "guitar": model.guitar,
                             "thresholds": {d: r["threshold"] for d, r in res.items()},
                             "val": res, "step": step}, args.out)
-                print(f"   guardado (puntuación {mean:.3f}) -> {args.out}")
+                print("   " + t("guardado (puntuación {score:.3f}) -> {out}", score=mean, out=args.out))
     return 0
 
 

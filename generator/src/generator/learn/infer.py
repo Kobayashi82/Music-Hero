@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from ..audio import load_mono
+from ..i18n import t
 from .data import DIFFS, FPS, SR, features
 from .frets import fret_emissions, load_transitions, viterbi
 from .model import OnsetNet, combo_frets
@@ -68,7 +69,7 @@ def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 
     g = None
     if model.guitar:
         if guitar is None:
-            raise ValueError(f"{model_path.name} necesita la pista de guitarra (stems/guitar.flac)")
+            raise ValueError(t("{name} necesita la pista de guitarra (stems/guitar.flac)", name=model_path.name))
         g = load_mono(guitar, SR) * scale  # con la escala de la mezcla, como al entrenar
     feats = features(y * scale, device, g)
     probs = predict_song(model, feats, device, style)
@@ -77,7 +78,8 @@ def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 
     for k, d in enumerate(DIFFS):
         on, th = onsets_with_min(probs[:, k], thresholds[d], int(MIN_NPS[d] * seconds))
         if th != thresholds[d]:
-            print(f"    {d}: pocas notas con el umbral {thresholds[d]}, bajado a {th} ({len(on)} notas)", flush=True)
+            print(f"    {d}: " + t("pocas notas con el umbral {old}, bajado a {new} ({n} notas)", old=thresholds[d],
+                                    new=th, n=len(on)), flush=True)
         combos = None
         if model.frets:
             trans = load_transitions() if d in VITERBI else None

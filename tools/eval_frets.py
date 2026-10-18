@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from generator.i18n import t
 from generator.learn.data import FPS
 from generator.learn.frets import fret_emissions, load_transitions, viterbi
 from generator.learn.infer import load
@@ -38,22 +39,24 @@ def main() -> int:
     songs = Songs(Path(sys.argv[2]), exclude=set()).items
     trans = load_transitions()
     probs = [predict_song(model, s["feats"], "cuda", s["style"]) for s in songs]
-    print(f"{len(songs)} canciones")
+    print(t("{n} canciones", n=len(songs)))
     for k, d in enumerate(DIFFS):
-        rows = {"nota a nota": np.zeros(N_M)} | {f"v {w:g}/{b:g}": np.zeros(N_M) for w, b in SETTINGS}
+        each = t("nota a nota")
+        rows = {each: np.zeros(N_M)} | {f"v {w:g}/{b:g}": np.zeros(N_M) for w, b in SETTINGS}
         for s, pr in zip(songs, probs):
             frames, ref = s["frets"][k]
             if len(frames) < 2:
                 continue
             e = fret_emissions(pr, k, frames)
-            rows["nota a nota"] += metrics(e.argmax(axis=1), ref)
+            rows[each] += metrics(e.argmax(axis=1), ref)
             for w, b in SETTINGS:
                 rows[f"v {w:g}/{b:g}"] += metrics(viterbi(e, frames / FPS * 1000, b * trans[k], w), ref)
         print(f"{d}:")
         for name, m in rows.items():
             ex, dr, nd, cp, cr, rp, rr, n, mv, nm = m
-            print(f"  {name:<12} exactos {ex / n:5.1%}  dirección {dr / nd:5.1%}  sube/baja {mv / nm:5.1%}  acordes {cp / n:5.1%} (humanas {cr / n:.1%})"
-                  f"  repite {rp / nd:5.1%} (humanas {rr / nd:.1%})")
+            print(f"  {name:<12} " + t("exactos {ex:5.1%}  dirección {dir:5.1%}  sube/baja {mv:5.1%}  acordes {cp:5.1%} "
+                                        "(humanas {cr:.1%})  repite {rp:5.1%} (humanas {rr:.1%})",
+                                        ex=ex / n, dir=dr / nd, mv=mv / nm, cp=cp / n, cr=cr / n, rp=rp / nd, rr=rr / nd))
     return 0
 
 

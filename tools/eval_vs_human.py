@@ -12,6 +12,8 @@ import sys
 
 import numpy as np
 
+from generator.i18n import t
+
 TOL = 60
 
 
@@ -45,8 +47,10 @@ def compare(ref, cand, offset=0.0):
 ref_path, diff = sys.argv[1], sys.argv[2]
 ref = load(ref_path, diff)
 dur = (ref[-1][0] - ref[0][0]) / 1000
-print(f"referencia humana ({diff}): {len(ref)} notas, {len(ref) / dur:.2f}/s, acordes {np.mean([len(f) > 1 for _, f in ref]):.0%}")
-print(f"{'candidata':<26} {'notas':>6} {'F1':>5} {'recall':>7} {'precis.':>8} {'dirección':>10} {'acordes':>8}")
+print(t("referencia humana ({diff}): {n} notas, {nps:.2f}/s, acordes {ch:.0%}", diff=diff, n=len(ref),
+        nps=len(ref) / dur, ch=np.mean([len(f) > 1 for _, f in ref])))
+print(f"{t('candidata'):<26} {t('notas'):>6} {'F1':>5} {'recall':>7} {t('precis.'):>8} {t('dirección'):>10} "
+      f"{t('acordes'):>8}")
 for arg in sys.argv[3:]:
     name, spec = arg.split("=", 1)
     path, _, d = spec.rpartition(":")
@@ -55,4 +59,5 @@ for arg in sys.argv[3:]:
     cand = sorted(load(path, d or diff))
     best = max((compare(ref, cand, o) + (o,) for o in range(-300, 301, 10)), key=lambda x: x[0])
     f, r, p, dirm, ch, o = best
-    print(f"{name:<26} {len(cand):6} {f:5.2f} {r:7.0%} {p:8.0%} {dirm:10.0%} {ch:8.0%}   (desfase {o} ms)")
+    print(f"{name:<26} {len(cand):6} {f:5.2f} {r:7.0%} {p:8.0%} {dirm:10.0%} {ch:8.0%}   "
+          + t("(desfase {ms} ms)", ms=o))

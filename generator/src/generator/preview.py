@@ -6,12 +6,15 @@ V cambia de vista (línea temporal / autopista), C activa clics en cada nota.
 """
 
 import json
+import re
 from pathlib import Path
 
+from .i18n import lang, t
 from .model import ChartNote, Section, SongInfo, SourceNote
 from .rhythm import TempoMap
 
 STEM_ORDER = ["guitar", "piano", "other", "vocals", "bass"]
+UI_TEXT = re.compile(r"\{\{(.+?)\}\}")  # textos de la plantilla: {{texto en español}} -> t(texto)
 
 
 def write_preview(path: Path, song: SongInfo, tempo: TempoMap, notes: list[ChartNote], sections: list[Section],
@@ -38,14 +41,15 @@ def write_preview(path: Path, song: SongInfo, tempo: TempoMap, notes: list[Chart
                       STEM_ORDER.index(s.stem) if s.stem in STEM_ORDER else -1, round(s.energy, 2)]
                      for s in sections],
     }
-    html = (TEMPLATE.replace("__TITLE__", f"{song.artist} - {song.title}".replace("<", ""))
+    html = (UI_TEXT.sub(lambda m: t(m.group(1)), TEMPLATE).replace("__LANG__", lang())
+            .replace("__TITLE__", f"{song.artist} - {song.title}".replace("<", ""))
             .replace("__AUDIO__", Path(song.audio_path).resolve().as_uri())
             .replace("__DATA__", json.dumps(data, separators=(",", ":"))))
     path.write_text(html, encoding="utf-8")
 
 
 TEMPLATE = r"""<!doctype html>
-<html lang="es">
+<html lang="__LANG__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -74,12 +78,12 @@ TEMPLATE = r"""<!doctype html>
   <h1>__TITLE__</h1>
   <div class="stats" id="stats"></div>
   <div class="ctrl">
-    <select id="diff" title="dificultad"></select>
+    <select id="diff" title="{{dificultad}}"></select>
     <button id="play">▶ Play</button>
     <span id="time">0:00</span>
-    <button id="view" title="V">Autopista</button>
-    <button id="click" title="C">Clic en notas</button>
-    <label title="segundos visibles">zoom <input id="zoom" type="range" min="2" max="30" value="8"></label>
+    <button id="view" title="V">{{Autopista}}</button>
+    <button id="click" title="C">{{Clic en notas}}</button>
+    <label title="{{segundos visibles}}">zoom <input id="zoom" type="range" min="2" max="30" value="8"></label>
   </div>
 </header>
 <canvas id="cv"></canvas>
@@ -89,11 +93,11 @@ TEMPLATE = r"""<!doctype html>
 const D = __DATA__;
 const LANE = ["#2ecc40","#ff4136","#ffdc00","#0074d9","#ff851b"];
 const STEMC = {guitar:"#ff9f43", piano:"#48dbfb", other:"#a4b0be", vocals:"#ff6b9d", bass:"#a29bfe"};
-const NAMES = {guitar:"guitarra", piano:"piano", other:"otros", vocals:"voz", bass:"bajo"};
+const NAMES = {guitar:"{{guitarra}}", piano:"piano", other:"{{otros}}", vocals:"{{voz}}", bass:"{{bajo}}"};
 const au = document.getElementById("au"), cv = document.getElementById("cv"), ctx = cv.getContext("2d");
 let view = "timeline", clicks = false, span = 8, lastT = 0, actx = null, seekTo = 0;
 
-const DIFF_NAMES = {expert:"Experto", hard:"Difícil", medium:"Medio", easy:"Fácil"};
+const DIFF_NAMES = {expert:"{{Experto}}", hard:"{{Difícil}}", medium:"{{Medio}}", easy:"{{Fácil}}"};
 D.notes = D.diffs.expert || Object.values(D.diffs)[0];
 // ---------- estadísticas ----------
 function stats(){
@@ -107,10 +111,10 @@ function stats(){
   const pct = x => Math.round(100*x/Math.max(1,n.length)) + "%";
   const energy = D.sections.reduce((a, s) => a + s[3], 0) / Math.max(1, D.sections.length);
   document.getElementById("stats").innerHTML =
-    `<b>${n.length}</b> notas · <b>${(n.length/dur).toFixed(1)}</b> nps (máx ${maxNps}) · acordes <b>${pct(chords)}</b> · HOPO <b>${pct(hopos)}</b> · sustains <b>${pct(sus)}</b> · energía <b>${energy.toFixed(2)}</b> · fuente: ${src} · v${D.version}`;
+    `<b>${n.length}</b> {{notas}} · <b>${(n.length/dur).toFixed(1)}</b> nps ({{máx}} ${maxNps}) · {{acordes}} <b>${pct(chords)}</b> · HOPO <b>${pct(hopos)}</b> · sustains <b>${pct(sus)}</b> · {{energía}} <b>${energy.toFixed(2)}</b> · {{fuente:}} ${src} · v${D.version}`;
   document.getElementById("legend").innerHTML = D.stems.map(s => `<span style="--c:${STEMC[s]}">${NAMES[s]}</span>`).join("")
-    + `<span style="--c:#fff">contorno elegido</span>`
-    + ` · espacio play · ← → ±5 s · V vista · C clics · clic para saltar`;
+    + `<span style="--c:#fff">{{contorno elegido}}</span>`
+    + ` · {{espacio play · ← → ±5 s · V vista · C clics · clic para saltar}}`;
 }
 stats();
 (function diffSelect(){
@@ -226,11 +230,11 @@ function frame() {
 }
 
 function toggle() { if (au.paused) au.play(); else au.pause(); }
-au.onplay = () => document.getElementById("play").textContent = "❚❚ Pausa";
+au.onplay = () => document.getElementById("play").textContent = "❚❚ {{Pausa}}";
 au.onpause = () => document.getElementById("play").textContent = "▶ Play";
 document.getElementById("play").onclick = toggle;
 document.getElementById("view").onclick = () => { view = view === "timeline" ? "highway" : "timeline";
-  document.getElementById("view").textContent = view === "timeline" ? "Autopista" : "Línea temporal"; };
+  document.getElementById("view").textContent = view === "timeline" ? "{{Autopista}}" : "{{Línea temporal}}"; };
 document.getElementById("click").onclick = e => { clicks = !clicks; e.target.classList.toggle("on", clicks); };
 document.getElementById("zoom").oninput = e => span = +e.target.value;
 cv.onclick = e => { if (view !== "timeline") return toggle();

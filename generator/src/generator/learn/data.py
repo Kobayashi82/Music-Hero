@@ -30,6 +30,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ..i18n import t
+
 SR = 22050
 HOP = 256
 FPS = SR / HOP  # ~86,13 fotogramas por segundo
@@ -259,10 +261,11 @@ def main() -> int:
                 done += 1
             except Exception as e:  # noqa: BLE001 - un paquete raro no para el resto
                 failed.add(p.stem)
-                print(f"   fallo {p.name}: {e}")
+                print("   " + t("fallo {name}: {err}", name=p.name, err=e))
             if done % 50 == 0 and done:
-                print(f"{done} preparadas ({len(failed)} descartadas), {(time.time() - t0) / max(1, done):.1f} s/canción")
-    print(f"Fin: {done} procesadas, {len(failed)} descartadas")
+                print(t("{done} preparadas ({failed} descartadas), {secs:.1f} s/canción", done=done, failed=len(failed),
+                        secs=(time.time() - t0) / max(1, done)))
+    print(t("Fin: {done} procesadas, {failed} descartadas", done=done, failed=len(failed)))
     return 0
 
 

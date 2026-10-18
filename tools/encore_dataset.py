@@ -28,6 +28,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from generator.i18n import t
+
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out" / "dataset"
 CATALOG = OUT / "catalog.json"
@@ -80,9 +82,9 @@ def post(path: str, body: dict, retries: int = 5) -> dict:
             return json.load(urllib.request.urlopen(req, timeout=30))
         except (urllib.error.URLError, TimeoutError) as e:
             wait = 5 * (attempt + 1)
-            print(f"   reintento en {wait} s ({e})")
+            print("   " + t("reintento en {s} s ({err})", s=wait, err=e))
             time.sleep(wait)
-    raise RuntimeError(f"Encore no responde: {path}")
+    raise RuntimeError(t("Encore no responde: {path}", path=path))
 
 
 def advanced(page: int, instrument: str = "guitar", **filters) -> dict:
@@ -132,11 +134,12 @@ def cmd_catalog(queries: list[tuple] = QUERIES, dest: Path = CATALOG, exclude_ca
                 got += 1
                 if got >= quota:
                     break
-            print(f"{instrument}:{field}={value}: página {page}, {got}/{quota} (total {len(chosen)})")
+            print(f"{instrument}:{field}={value}: " + t("página {page}, {got}/{quota} (total {total})", page=page,
+                                                         got=got, quota=quota, total=len(chosen)))
             page += 1
             time.sleep(1.0)
     dest.write_text(json.dumps(list(chosen.values()), ensure_ascii=False, indent=0), encoding="utf-8")
-    print(f"\nCatálogo: {len(chosen)} charts -> {dest}")
+    print("\n" + t("Catálogo: {n} charts -> {dest}", n=len(chosen), dest=dest))
 
 
 def download(md5: str, dest: Path, novideo: bool) -> int:
@@ -162,21 +165,23 @@ def cmd_download(items: list[dict] | None = None, dest_dir: Path = SNG_DIR) -> N
         if dest.exists():
             continue
         if total > BUDGET_BYTES:
-            print(f"Tope de {BUDGET_BYTES / 1024**3:.0f} GB alcanzado.")
+            print(t("Tope de {gb:.0f} GB alcanzado.", gb=BUDGET_BYTES / 1024**3))
             break
         try:
             total += download(c["md5"], dest, bool(c.get("hasVideoBackground")))
             done += 1
         except Exception as e:  # noqa: BLE001 - un paquete roto no para la descarga
             failed += 1
-            print(f"   fallo {c.get('artist')} - {c.get('name', c.get('title'))}: {e}")
+            print("   " + t("fallo {name}: {err}", name=f"{c.get('artist')} - {c.get('name', c.get('title'))}", err=e))
             time.sleep(3)
             continue
         if done % 25 == 0:
             rate = total / 1024**2 / max(1, time.time() - t0)
-            print(f"{i + 1}/{len(items)}: {done} bajadas, {failed} fallos, {total / 1024**3:.1f} GB ({rate:.1f} MB/s)", flush=True)
+            print(f"{i + 1}/{len(items)}: " + t("{done} bajadas, {failed} fallos, {gb:.1f} GB ({rate:.1f} MB/s)",
+                                                 done=done, failed=failed, gb=total / 1024**3, rate=rate), flush=True)
         time.sleep(0.3)
-    print(f"Fin: {done} bajadas, {failed} fallos, {total / 1024**3:.1f} GB en {dest_dir}")
+    print(t("Fin: {done} bajadas, {failed} fallos, {gb:.1f} GB en {dest}", done=done, failed=failed,
+            gb=total / 1024**3, dest=dest_dir))
 
 
 def cmd_library() -> None:
@@ -211,10 +216,11 @@ def cmd_library() -> None:
             OUT.mkdir(parents=True, exist_ok=True)
             progress.write_text(json.dumps({"seen": sorted(seen), "found": found}, ensure_ascii=False), encoding="utf-8")
         if (i + 1) % 25 == 0:
-            print(f"{i + 1}/{len(files)}: {len(found)} con chart", flush=True)
+            print(f"{i + 1}/{len(files)}: " + t("{n} con chart", n=len(found)), flush=True)
         time.sleep(1.0)
     LIBRARY_JSON.write_text(json.dumps(found, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"\n{len(found)}/{len(files)} canciones de la biblioteca con chart humana -> {LIBRARY_JSON}")
+    print("\n" + t("{found}/{total} canciones de la biblioteca con chart humana -> {dest}", found=len(found),
+                   total=len(files), dest=LIBRARY_JSON))
     cmd_download(found, ROOT / "out" / "encore")
 
 
