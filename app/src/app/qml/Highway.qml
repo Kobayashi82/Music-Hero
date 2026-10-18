@@ -158,11 +158,73 @@ Item {
                 PathLine { x: root.xAt(rail.outer, -0.25); y: root.yAt(-0.25) }
                 PathLine { x: root.xAt(rail.inner, -0.25); y: root.yAt(-0.25) }
             }
-            ShapePath {  // filo de luz en el lado de dentro (azul con el star power)
-                strokeWidth: root.f.starOn ? 3 : 1.5; strokeColor: root.f.starOn ? root.starColor : "#90ffffff"
+            ShapePath {  // filo de luz en el lado de dentro (azul con el star power, o si se puede activar)
+                strokeWidth: root.f.starOn || root.f.starReady ? 3 : 1.5
+                strokeColor: root.f.starOn || root.f.starReady ? root.starColor : "#90ffffff"
                 fillColor: "transparent"
                 startX: root.xAt(rail.inner, 1); startY: root.horizonY
                 PathLine { x: root.xAt(rail.inner, -0.25); y: root.yAt(-0.25) }
+            }
+        }
+    }
+    Repeater {  // star power listo: por fuera de cada raíl, un resplandor azul que late y luces que suben (levántala)
+        model: 2
+        Item {
+            id: side
+            anchors.fill: parent
+            visible: root.f.starReady
+            readonly property real dir: index === 0 ? -1 : 1  // hacia fuera
+            readonly property real edge: 2 + side.dir * 2.62  // borde de fuera del raíl, en carriles
+            readonly property real pulse: 0.5 + 0.5 * Math.sin(root.f.time * 6)
+            Repeater {  // tres franjas cada vez más flojas: se difumina hacia fuera
+                model: 3
+                Shape {
+                    id: band
+                    preferredRendererType: Shape.CurveRenderer
+                    anchors.fill: parent
+                    readonly property real l0: side.edge + side.dir * 0.2 * index
+                    readonly property real l1: side.edge + side.dir * 0.2 * (index + 1)
+                    opacity: (0.5 + 0.5 * side.pulse) * [1, 0.6, 0.3][index]
+                    ShapePath {
+                        strokeWidth: 0; strokeColor: "transparent"
+                        fillGradient: LinearGradient {
+                            y1: root.horizonY; y2: root.yAt(-0.25)
+                            GradientStop { position: 0; color: "transparent" }
+                            GradientStop { position: 0.3; color: "#a07fd4ff" }
+                            GradientStop { position: 1; color: root.starColor }
+                        }
+                        startX: root.xAt(band.l0, 1); startY: root.horizonY
+                        PathLine { x: root.xAt(band.l1, 1); y: root.horizonY }
+                        PathLine { x: root.xAt(band.l1, -0.25); y: root.yAt(-0.25) }
+                        PathLine { x: root.xAt(band.l0, -0.25); y: root.yAt(-0.25) }
+                    }
+                }
+            }
+            Repeater {  // destellos que suben por el raíl, de la línea de golpeo al horizonte
+                model: 2
+                Shape {
+                    id: streak
+                    preferredRendererType: Shape.CurveRenderer
+                    anchors.fill: parent
+                    readonly property real u0: ((root.f.time * 0.9 + index * 0.7) % 1.4) - 0.25
+                    readonly property real u1: Math.min(1, u0 + 0.3)
+                    readonly property real l0: side.edge - side.dir * 0.14  // desde el raíl
+                    readonly property real l1: side.edge + side.dir * 0.45
+                    visible: u0 < 0.95
+                    ShapePath {
+                        strokeWidth: 0; strokeColor: "transparent"
+                        fillGradient: LinearGradient {
+                            y1: root.yAt(streak.u1); y2: root.yAt(streak.u0)
+                            GradientStop { position: 0; color: "transparent" }
+                            GradientStop { position: 0.75; color: "#e0ffffff" }
+                            GradientStop { position: 1; color: "transparent" }
+                        }
+                        startX: root.xAt(streak.l0, streak.u1); startY: root.yAt(streak.u1)
+                        PathLine { x: root.xAt(streak.l1, streak.u1); y: root.yAt(streak.u1) }
+                        PathLine { x: root.xAt(streak.l1, streak.u0); y: root.yAt(streak.u0) }
+                        PathLine { x: root.xAt(streak.l0, streak.u0); y: root.yAt(streak.u0) }
+                    }
+                }
             }
         }
     }

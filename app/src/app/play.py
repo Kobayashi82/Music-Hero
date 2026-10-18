@@ -846,9 +846,8 @@ class Session(QObject):
         if not self.player.playing or self.waiting:
             return
         t = self.player.position_ms(ev.t)
-        if ev.kind == "control" and ev.value == "star" and not self.game.activate(t) and not self.game.stats.star:
-            self.toast(f"Star power: hace falta media barra (llevas {self.game.energy:.0%}). "
-                       "Se llena tocando enteras las frases de notas con estrella", 4)
+        if ev.kind == "control" and ev.value == "star":
+            self.game.activate(t)  # sin media barra no hace nada (los lados de la autopista avisan cuando se puede)
         if ev.kind == "fret":
             self.game.fret(ev.value, ev.down, t)
         elif ev.kind == "strum" and ev.down:
