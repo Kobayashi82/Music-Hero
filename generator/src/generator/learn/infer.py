@@ -10,6 +10,7 @@ import torch
 
 from ..audio import load_mono
 from .data import DIFFS, FPS, SR, features
+from .frets import fret_emissions, load_transitions, viterbi
 from .model import OnsetNet, combo_frets
 from .train import fret_combo_at, peaks, predict_song
 
@@ -20,6 +21,10 @@ SUSTAIN_THRESHOLD = 0.25
 # Notas por segundo como mínimo (p1 de las charts humanas: 0,84 / 0,65 / 0,45 / 0,33). En pistas
 # ambientales el modelo apenas pasa del umbral y la chart sale vacía: se baja el umbral hasta llegar.
 MIN_NPS = {"expert": 0.8, "hard": 0.6, "medium": 0.4, "easy": 0.3}
+# Botones por secuencia (frets.py): (peso del modelo, fuerza de las transiciones). Solo en Experto: en el
+# examen (92 charts, tools/eval_frets.py) sube/baja acierta 41,7 % frente a 37,5 % nota a nota; en Difícil
+# apenas cambia y en Medio y Fácil empeora (repite botón de más).
+VITERBI = {"expert": (1.0, 0.6)}
 LOWER_THRESHOLDS = (0.5, 0.4, 0.3, 0.2, 0.1, 0.05)
 
 
@@ -64,6 +69,14 @@ def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 
         on, th = onsets_with_min(probs[:, k], thresholds[d], int(MIN_NPS[d] * seconds))
         if th != thresholds[d]:
             print(f"    {d}: pocas notas con el umbral {thresholds[d]}, bajado a {th} ({len(on)} notas)", flush=True)
+        combos = None
+        if model.frets:
+            trans = load_transitions() if d in VITERBI else None
+            if trans is not None and len(on):
+                w, b = VITERBI[d]
+                combos = viterbi(fret_emissions(probs, k, on), on / FPS * 1000, b * trans[k], w)
+            else:
+                combos = [fret_combo_at(probs, k, int(f)) for f in on]
         notes = []
         for i, f in enumerate(on):
             nxt = on[i + 1] if i + 1 < len(on) else len(probs)
@@ -72,7 +85,7 @@ def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 
                 end += 1
             start_ms = int(round(f / FPS * 1000))
             end_ms = int(round(end / FPS * 1000)) if (end - f) / FPS >= MIN_SUSTAIN_S else start_ms + 100
-            frets = combo_frets(fret_combo_at(probs, k, int(f))) if model.frets else None
+            frets = combo_frets(int(combos[i])) if combos is not None else None
             notes.append(ModelNote(start_ms, end_ms, float(probs[f, 8 + k]), float(probs[f, k]), frets))
         out[d] = notes
     return out

@@ -254,6 +254,8 @@ def align(chart_audio: list[Path], user_audio: Path) -> Alignment:
     hop_c = 2048
     ca = librosa.feature.chroma_cqt(y=a, sr=SR, hop_length=hop_c)
     cb = librosa.feature.chroma_cqt(y=b, sr=SR, hop_length=hop_c)
+    # En silencio el croma es todo 0 (o NaN) y la distancia coseno da NaN: un poco de ruido de fondo plano.
+    ca, cb = np.nan_to_num(ca) + 1e-3, np.nan_to_num(cb) + 1e-3
     _, path = librosa.sequence.dtw(X=ca, Y=cb, metric="cosine", subseq=False)
     path = path[::-1]
     coarse_chart = path[:, 0] * hop_c / SR * 1000

@@ -9,6 +9,8 @@ Uso:
     uv run --project generator generate canción.mp3 --human chart.sng # chart hecha por personas, sincronizada
 
 Por defecto usa el modelo models/best.pt (las 4 dificultades); --no-model, las reglas (solo Experto).
+Si la canción tiene chart humana bajada (data/encore_library.json -> out/encore/), usa esa y el modelo
+solo para las dificultades que falten, o para todo si no encaja con el audio; --no-human lo desactiva.
 Caché: si out/<canción>/chart.json ya es de ese mismo audio (hash) y de esta versión del generador
 y del modelo, la canción se salta; --force la rehace. Los stems de Demucs se guardan para no repetirlo
 (~50 MB por canción); --drop-stems los borra al terminar.
@@ -28,6 +30,15 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUT = ROOT / "out" / "charts"
 DEFAULT_MODEL = ROOT / "models" / "best.pt"
 AUDIO_EXT = {".mp3", ".flac", ".ogg", ".opus", ".m4a", ".wav", ".wma"}
+# Canciones de la biblioteca con chart humana en Chorus Encore (tools/encore_dataset.py library) y
+# dónde están bajadas. Se usan solas salvo con --no-human.
+LIBRARY_JSON = ROOT / "data" / "encore_library.json"
+LIBRARY_SNG = ROOT / "out" / "encore"
+# La chart humana no encaja con el audio (otra versión, o la búsqueda emparejó otra canción) y se usa el
+# modelo si se afinan menos del 40 % de las anclas, o menos del 60 % con un desfase que varía más de 20 s
+# (en las 129 de la biblioteca: remixes, covers y versiones de otra duración; las buenas dan 75-98 %).
+MIN_HUMAN_CONFIDENCE = 0.4
+DOUBTFUL_HUMAN = (0.6, 20.0)  # (confianza, rango del desfase en s)
 
 
 def find_audio(paths: list[str]) -> list[Path]:
@@ -63,6 +74,21 @@ def too_long(files: list[Path], max_minutes: float) -> list[Path]:
     return out
 
 
+def library_human(audio: Path) -> Path | None:
+    """Chart humana bajada para este archivo de la biblioteca, si la hay."""
+    try:
+        found = json.loads(LIBRARY_JSON.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    key = str(audio.resolve()).lower()
+    for m in found:
+        if str(Path(m["file"])).lower() == key:
+            for p in (LIBRARY_SNG / f"{m['md5']}.sng", LIBRARY_SNG / m["md5"]):
+                if p.exists():
+                    return p
+    return None
+
+
 def generator_version(model_path: Path | None, human_chart: Path | None, max_nps: dict[str, float] | None = None) -> str:
     """Versión que se guarda en chart.json: cambia si cambia el algoritmo, el modelo, la chart humana
     o los límites de densidad."""
@@ -71,7 +97,7 @@ def generator_version(model_path: Path | None, human_chart: Path | None, max_nps
     v = __version__
     if human_chart is not None:
         v += f"+humana-{sha256_file(human_chart)[:8]}" if human_chart.is_file() else f"+humana-{human_chart.name}"
-    elif model_path is not None:
+    if model_path is not None:  # con chart humana, rellena las dificultades que falten (o la sustituye si no encaja)
         v += f"+{model_path.stem}-{sha256_file(model_path)[:8]}"
         if max_nps:
             v += "+nps-" + "-".join(f"{k}{n:g}" for k, n in sorted(max_nps.items()))
@@ -121,8 +147,9 @@ def up_to_date(out: Path, sha: str, version: str, clonehero: bool = False) -> bo
 def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str = "cuda",
              human_chart: Path | None = None, model_path: Path | None = None, force: bool = False,
              max_nps: dict[str, float] | None = None, drop_stems: bool = False, tag: str = "",
-             out_dir: Path | None = None) -> Path | None:
-    """Genera la chart de una canción. Devuelve su carpeta, o None si ya estaba hecha (caché)."""
+             out_dir: Path | None = None, use_library: bool = True) -> Path | None:
+    """Genera la chart de una canción. Devuelve su carpeta, o None si ya estaba hecha (caché).
+    use_library: sin human_chart, usar la chart humana de la biblioteca si está bajada."""
     from .audio import song_info
 
     t0 = time.perf_counter()
@@ -130,6 +157,8 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     def step(msg: str) -> None:
         print(f"{tag}  [{time.perf_counter() - t0:5.1f} s] {msg}", flush=True)
 
+    if human_chart is None and use_library:
+        human_chart = library_human(audio)
     song = song_info(audio)
     version = generator_version(model_path, human_chart, max_nps)
     out = out_dir or out_dir_for(audio, song.audio_sha256, out_root)
@@ -172,7 +201,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     step(f"chart Experto: {len(notes)} notas, energía media {energy:.2f}")
     difficulties = {"expert": notes}
 
-    if model_path is not None and human_chart is None:
+    if model_path is not None:
         from .learn.infer import predict
         from .mapping import map_from_model
 
@@ -185,12 +214,20 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
 
         hc = human.load(human_chart)
         alignment = human.align(hc.audio_files, audio)
-        difficulties = human.shift(hc.difficulties, alignment, tempo)
         offs = alignment.offsets()
-        step(f"chart humana: {hc.name} ({hc.charter}), sincronizada (anclas afinadas {alignment.confidence:.0%}, "
-             f"desfase {offs.min() / 1000:+.2f}..{offs.max() / 1000:+.2f} s): "
-             + ", ".join(f"{d} {len(n)}" for d, n in difficulties.items()))
-        notes = difficulties.get("expert", notes)
+        sync = (f"{hc.name} ({hc.charter}), anclas afinadas {alignment.confidence:.0%}, "
+                f"desfase {offs.min() / 1000:+.2f}..{offs.max() / 1000:+.2f} s")
+        doubtful = alignment.confidence < DOUBTFUL_HUMAN[0] and (offs.max() - offs.min()) / 1000 > DOUBTFUL_HUMAN[1]
+        if (alignment.confidence < MIN_HUMAN_CONFIDENCE or doubtful) and len(difficulties) == 4:
+            step(f"chart humana descartada, no encaja con el audio: {sync}")
+        else:
+            shifted = {d: n for d, n in human.shift(hc.difficulties, alignment, tempo).items() if n}
+            filled = [d for d in difficulties if d not in shifted]
+            difficulties = {d: shifted.get(d) or difficulties[d] for d in ("expert", "hard", "medium", "easy")
+                            if d in shifted or d in difficulties}
+            step(f"chart humana: {sync}: " + ", ".join(f"{d} {len(n)}" for d, n in shifted.items())
+                 + (f"; del modelo: {', '.join(filled)}" if filled else ""))
+            notes = difficulties.get("expert", notes)
 
     data = chart_json(song, tempo, difficulties, sections, version)
     write_json(out / "chart.json", data)
@@ -233,6 +270,8 @@ def main() -> int:
     parser.add_argument("--clonehero", action="store_true", help="exporta también notes.chart + song.ini + audio")
     parser.add_argument("--cpu", action="store_true", help="sin GPU")
     parser.add_argument("--human", type=Path, help="chart hecha por personas (.sng o carpeta) para sincronizar y usar")
+    parser.add_argument("--no-human", action="store_true",
+                        help=f"no usar las charts humanas de la biblioteca ({LIBRARY_JSON.name}, bajadas en out/encore/)")
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL,
                         help=f"modelo entrenado para las 4 dificultades (por defecto {DEFAULT_MODEL.name})")
     parser.add_argument("--no-model", action="store_true", help="sin modelo: reglas, solo Experto")
@@ -264,7 +303,7 @@ def main() -> int:
         parser.error("no hay archivos de audio")
     common = dict(out_root=args.out, clonehero=args.clonehero, device="cpu" if args.cpu else "cuda",
                   human_chart=args.human, model_path=model, force=args.force, max_nps=args.max_nps,
-                  drop_stems=args.drop_stems)
+                  drop_stems=args.drop_stems, use_library=not args.no_human)
     if len(files) == 1:
         generate(files[0], **common)
         return 0
