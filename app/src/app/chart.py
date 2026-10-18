@@ -7,9 +7,10 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .i18n import N_, TrDict
 from .paths import CHARTS_DIR
 DIFFS = ("expert", "hard", "medium", "easy")
-DIFF_NAMES = {"expert": "Experto", "hard": "Difícil", "medium": "Medio", "easy": "Fácil"}
+DIFF_NAMES = TrDict({"expert": N_("Experto"), "hard": N_("Difícil"), "medium": N_("Medio"), "easy": N_("Fácil")})
 
 
 @dataclass

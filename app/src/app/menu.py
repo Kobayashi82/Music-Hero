@@ -16,6 +16,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from html import escape
 
+from .i18n import N_, t
+
 WINDOW = 11
 LETTERS = "abcdefghijklmnñopqrstuvwxyz0123456789 "
 
@@ -37,8 +39,9 @@ class Menu:
     edit_hint = ""  # ayuda al editar (vacío: la de siempre)
 
     def __init__(self, title: str, options: list[Option], body: Callable[[], str] | str = "",
-                 on_back: Callable[[], None] | None = None):
+                 on_back: Callable[[], None] | None = None, key: str = ""):
         self.title, self.options = title, options
+        self.key = key  # para reconocer el menú (el título va traducido)
         self._body = body
         self.on_back = on_back
         self.sel = 0
@@ -97,15 +100,16 @@ class Menu:
         pages = -(-n // WINDOW)
         return {"title": self.title, "body": self.body, "sel": self.sel - start, "editing": self.editing,
                 "items": items, "values": values, "seps": seps, "rows": idx + [-1] * pad,
-                "above": start > 0, "below": start + WINDOW < n, "editHint": self.edit_hint,
-                "position": f"{self.sel + 1} / {n} · página {start // WINDOW + 1} de {pages}" if self.long else ""}
+                "above": start > 0, "below": start + WINDOW < n, "editHint": t(self.edit_hint) if self.edit_hint else "",
+                "position": (f"{self.sel + 1} / {n} · " + t("página {page} de {pages}", page=start // WINDOW + 1,
+                                                             pages=pages)) if self.long else ""}
 
 
 class SearchMenu(Menu):
     """Buscador: «Escribir» (con la guitarra: strum elige la letra, verde la añade), «Borrar» y debajo los
     resultados de search(texto). Con el teclado, type() y backspace()."""
 
-    edit_hint = "Strum: letra · Verde / +: añadirla · Rojo / −: listo"
+    edit_hint = N_("Strum: letra · Verde / +: añadirla · Rojo / −: listo")
     FIXED = 2  # opciones antes de los resultados
 
     def __init__(self, title: str, search: Callable[[str], list[Option]], on_back: Callable[[], None] | None = None):
@@ -118,22 +122,22 @@ class SearchMenu(Menu):
 
     def _describe(self) -> str:
         if not self.query.strip():
-            return "Escribe con el teclado, o con la guitarra en «Escribir».<br>Buscar: <b>_</b>"
+            return t("Escribe con el teclado, o con la guitarra en «Escribir».") + "<br>" + t("Buscar:") + " <b>_</b>"
         n = len(self._results)
-        found = "nada" if n == 0 else "1 canción" if n == 1 else f"{n} canciones"
-        return f"Buscar: <b>{escape(self.query)}_</b> · {found}"
+        found = t("nada") if n == 0 else t("1 canción") if n == 1 else t("{n} canciones", n=n)
+        return t("Buscar:") + f" <b>{escape(self.query)}_</b> · {found}"
 
     def _change_letter(self, d: int) -> None:
         self.letter = (self.letter + d) % len(LETTERS)
 
     def _letter_value(self) -> str:
         c = LETTERS[self.letter]
-        return "espacio" if c == " " else c.upper()
+        return t("espacio") if c == " " else c.upper()
 
     def _refresh(self) -> None:
         self._results = self._search(self.query) if self.query.strip() else []
-        self.options = [Option("Escribir", value=self._letter_value, change=self._change_letter),
-                        Option("Borrar letra", self.backspace)] + self._results
+        self.options = [Option(t("Escribir"), value=self._letter_value, change=self._change_letter),
+                        Option(t("Borrar letra"), self.backspace)] + self._results
         self.sel = min(self.sel, len(self.options) - 1)
 
     def type(self, text: str) -> None:

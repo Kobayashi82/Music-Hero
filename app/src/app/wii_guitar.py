@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 
 import hid
 
+from .i18n import t
+
 NINTENDO = 0x057E
 WIIMOTE_PIDS = (0x0306, 0x0330)  # RVL-CNT-01 y RVL-CNT-01-TR (Motion Plus integrado)
 GUITAR_ID = bytes([0x00, 0x00, 0xA4, 0x20, 0x01, 0x03])
@@ -90,7 +92,7 @@ class WiiGuitar:
         """accel: pedir también el acelerómetro (informes 0x35: el juego lo usa para el star power)."""
         found = cls.find()
         if not found:
-            raise RuntimeError("no hay ningún Wiimote emparejado (tools/pair_wiimote.py)")
+            raise RuntimeError(t("no hay ningún Wiimote emparejado (tools/pair_wiimote.py)"))
         dev = hid.device()
         dev.open_path(found[0]["path"])
         g = cls(dev, found[0]["path"], accel)

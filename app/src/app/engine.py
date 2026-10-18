@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .i18n import t
 from .paths import CHARTS_DIR, DATA, ENGINE_DIR, ENGINE_LOG, FROZEN, MODEL, QUEUE_FILE, REPO
 
 RESTART_DELAYS_S = (5, 30, 120)  # si se cae: espera antes de cada nuevo intento; luego, hasta que se le pida algo
@@ -122,7 +123,7 @@ class EngineClient:
             return True
         cmd = self.command()
         if cmd is None:
-            self.state.error = "no se puede lanzar el motor (falta uv, o no está instalado)"
+            self.state.error = t("no se puede lanzar el motor (falta uv, o no está instalado)")
             return False
         argv, env, cwd = cmd
         self.log.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +138,7 @@ class EngineClient:
                                               stderr=log, text=True, encoding="utf-8", errors="replace", bufsize=1,
                                               creationflags=flags)
             except OSError as e:
-                self.state.error = f"no se pudo lanzar el motor: {e}"
+                self.state.error = t("no se pudo lanzar el motor: {err}", err=e)
                 return False
         self._stopping = False
         self._restart_at = None
@@ -225,7 +226,7 @@ class EngineClient:
             self._proc = None
             s.running, s.current, s.done, s.step = False, None, 0.0, ""
             if not self._stopping:  # se ha caído
-                s.error = f"el motor se cerró (código {ev['code']}); detalles en {self.log.name}"
+                s.error = t("el motor se cerró (código {code}); detalles en {log}", code=ev["code"], log=self.log.name)
                 if self._restarts < len(RESTART_DELAYS_S):
                     self._restart_at = now + RESTART_DELAYS_S[self._restarts]
                     self._restarts += 1

@@ -23,11 +23,12 @@ from pathlib import Path
 
 from .chart import CHARTS_DIR
 from .config import CONFIG_FILE
+from .i18n import N_, t
 
 LIBRARY_FILE = CONFIG_FILE.parent / "library.json"
 _PREFIX = re.compile(r"^\s*(\d+)\s*[-.)_]\s*")
-NO_ALBUM = "(sin álbum)"
-NO_ARTIST = "(sin artista)"
+NO_ALBUM = N_("(sin álbum)")  # traducidos al agrupar
+NO_ARTIST = N_("(sin artista)")
 AUDIO_EXT = {".mp3", ".flac", ".ogg", ".opus", ".m4a", ".wav", ".wma"}  # las mismas que generator/cli.py
 RESCAN_S = 600  # cada cuánto se vuelven a recorrer las carpetas (canciones nuevas)
 
@@ -107,9 +108,9 @@ def group(entries: list[Entry]) -> dict[str, dict[str, list[Entry]]]:
             order, e.group_album = split_prefix(parts[-2])
             e.album_order = order if order is not None else 0
         elif len(parts) == 2:  # Artista/canción
-            e.group_artist, e.group_album = parts[0], e.album or NO_ALBUM
+            e.group_artist, e.group_album = parts[0], e.album or t(NO_ALBUM)
         else:
-            e.group_artist, e.group_album = e.artist or NO_ARTIST, e.album or NO_ALBUM
+            e.group_artist, e.group_album = e.artist or t(NO_ARTIST), e.album or t(NO_ALBUM)
         if not e.title:
             e.title = name
     tree: dict[str, dict[str, list[Entry]]] = {}

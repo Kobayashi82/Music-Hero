@@ -16,7 +16,7 @@ Item {
                        score: 0, streak: 0, mult: 1, accuracy: 1, title: "", difficulty: "", message: "",
                        progress: 0, countdown: 0, menu: ({}), menuHint: "", calib: ({}), toast: "",
                        opacity: 0.85, missFlash: 0, missLane: [0, 0, 0, 0, 0], burn: [false, false, false, false, false],
-                       time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560, hudSide: "right",
+                       time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560, hudSide: "right", lang: "es",
                        lyricsOn: false, lyrics: ({}), baseMult: 1, star: 0, starOn: false, starReady: false,
                        phraseFlash: 0, starFlash: 0 })
     readonly property var colors: ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
@@ -62,7 +62,7 @@ Item {
                             0, 0, 1, 0,
                             g / w, hh / h, 0, 1)
     }
-    function fmt(n) { return Math.round(n).toLocaleString(Qt.locale("es_ES"), "f", 0) }
+    function fmt(n) { return Math.round(n).toLocaleString(Qt.locale(root.f.lang === "en" ? "en_US" : "es_ES"), "f", 0) }
 
     FrameAnimation {
         running: true
@@ -389,7 +389,7 @@ Item {
                 readonly property bool beaten: root.f.best > 0 && root.f.score > root.f.best && !root.f.partial
                 anchors.right: parent.right
                 visible: root.f.best > 0
-                text: beaten ? "¡Récord! (" + root.fmt(root.f.best) + ")" : "Récord " + root.fmt(root.f.best)
+                text: (beaten ? bridge.tr("¡Récord! (%1)") : bridge.tr("Récord %1")).arg(root.fmt(root.f.best))
                 color: beaten ? "#ffd23c" : "#99ffffff"; font.pixelSize: 16; font.bold: beaten
             }
             Text { anchors.right: parent.right; text: root.fmt(root.f.score); color: "white"
@@ -433,14 +433,16 @@ Item {
                 }
             }
             Text { anchors.right: parent.right
-                   text: root.f.starOn ? "¡Star power!" : root.f.starReady ? "Star power: levanta la guitarra" : " "
+                   text: root.f.starOn ? bridge.tr("¡Star power!")
+                         : root.f.starReady ? bridge.tr("Star power: levanta la guitarra") : " "
                    color: root.starColor; font.pixelSize: 16; font.bold: true }
             Text { anchors.right: parent.right
-                   text: root.f.streak > 1 ? root.f.streak + " seguidas" : root.f.streak === 1 ? "1 seguida" : " "
+                   text: root.f.streak > 1 ? bridge.tr("%1 seguidas").arg(root.f.streak)
+                         : root.f.streak === 1 ? bridge.tr("1 seguida") : " "
                    color: "white"; font.pixelSize: 20 }
             Text { anchors.right: parent.right; text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty
                    color: "#ccffffff"; font.pixelSize: 17 }
-            Text { anchors.right: parent.right; visible: root.f.autoplay; text: "Automático"; color: "#ffdc00"
+            Text { anchors.right: parent.right; visible: root.f.autoplay; text: bridge.tr("Automático"); color: "#ffdc00"
                    font.pixelSize: 17; font.bold: true }
         }
     }
@@ -589,7 +591,8 @@ Item {
                    text: root.menuOpen ? root.f.menu.position : ""; color: "#88ffffff"; font.pixelSize: 13 }
             Text { width: parent.width; topPadding: 10; horizontalAlignment: Text.AlignHCenter
                    text: root.menuOpen && root.f.menu.editing
-                         ? (root.f.menu.editHint || "Strum: cambiar · Verde / + o Rojo / −: listo") : root.f.menuHint
+                         ? (root.f.menu.editHint || bridge.tr("Strum: cambiar · Verde / + o Rojo / −: listo"))
+                         : root.f.menuHint
                    color: "#99ffffff"; font.pixelSize: 14 }
         }
     }
@@ -601,17 +604,16 @@ Item {
         Column {
             id: calCol
             x: 28; y: 24; width: parent.width - 56; spacing: 12
-            Text { text: "Calibrar el retardo"; color: "white"; font.pixelSize: 30; font.bold: true }
+            Text { text: bridge.tr("Calibrar el retardo"); color: "white"; font.pixelSize: 30; font.bold: true }
             Text { width: parent.width; color: "#ddffffff"; font.pixelSize: 17; wrapMode: Text.WordWrap
-                   text: "Rasguea justo cuando cada nota amarilla llegue a la línea: suena un clic al pasar. "
-                         + "Los 4 clics agudos del principio solo marcan el ritmo. No hace falta pulsar trastes.<br>"
-                   + "Rojo / −: cancelar"; textFormat: Text.StyledText }
+                   text: bridge.tr("Rasguea justo cuando cada nota amarilla llegue a la línea: suena un clic al pasar. Los 4 clics agudos del principio solo marcan el ritmo. No hace falta pulsar trastes.")
+                         + "<br>" + bridge.tr("Rojo / −: cancelar"); textFormat: Text.StyledText }
             Rectangle {
                 width: parent.width; height: 6; radius: 3; color: "#44ffffff"
                 Rectangle { width: parent.width * (root.calibrating ? root.f.calib.progress : 0); height: 6; radius: 3
                             color: "#2ecc40" }
             }
-            Text { text: "Notas: " + (root.calibrating ? root.f.calib.taps + " / " + root.f.calib.total : ""); color: "white"
+            Text { text: bridge.tr("Notas:") + " " + (root.calibrating ? root.f.calib.taps + " / " + root.f.calib.total : ""); color: "white"
                    font.pixelSize: 20 }
         }
     }

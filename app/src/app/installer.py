@@ -25,11 +25,14 @@ import threading
 import time
 from pathlib import Path
 
+from .i18n import N_, t
 from .paths import ENGINE_DIR, FROZEN, REPO
 
 BUNDLE = Path(getattr(sys, "_MEIPASS", REPO))  # lo que va dentro de la app (PyInstaller) o el repositorio
 MIN_DRIVER = 580  # CUDA 13 (torch cu130)
 NO_WINDOW = subprocess.CREATE_NO_WINDOW
+UV_STEPS = {"Downloading": N_("Descargando"), "Downloaded": N_("Descargado"), "Installed": N_("Instalado"),
+            "Prepared": N_("Preparado"), "Using CPython": "Python", "Resolved": N_("Resuelto")}  # lo que dice uv
 SIZE_GB = {"cuda": 5, "cpu": 3}  # lo que baja, más o menos (motor + modelos)
 
 
@@ -95,24 +98,24 @@ class EngineInstaller:
             with open(self.log, "a", encoding="utf-8") as log:
                 log.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
                 self._install(log)
-            self.state, self.step, self.done = "done", "Motor listo", 1.0
+            self.state, self.step, self.done = "done", t("Motor listo"), 1.0
         except Exception as e:  # noqa: BLE001 - sin red, disco lleno...: se enseña y se puede repetir
             self.state, self.error = "error", f"{e}"
 
     def _install(self, log) -> None:
         project = self.engine_dir / "project"
-        self.step = "Preparando el motor"
+        self.step = t("Preparando el motor")
         shutil.copytree(self.source, project, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns(".venv", "__pycache__", "*.egg-info", "*.pyc"))
         drv = driver_version()
         self.variant = "cuda" if drv is not None and drv >= MIN_DRIVER else "cpu"
-        log.write(f"driver NVIDIA: {drv}; variante: {self.variant}\n")
+        log.write(t("driver NVIDIA: {drv}; variante: {variant}", drv=drv, variant=self.variant) + "\n")
         if self.variant == "cpu":
             pp = project / "pyproject.toml"
             pp.write_text(cpu_pyproject(pp.read_text(encoding="utf-8")), encoding="utf-8")
             (project / "uv.lock").unlink(missing_ok=True)
 
-        self.step = "Descargando el motor (Python, torch...)"
+        self.step = t("Descargando el motor (Python, torch...)")
         env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
         env |= {"UV_PROJECT_ENVIRONMENT": str(self.engine_dir / ".venv"), "UV_PYTHON_PREFERENCE": "only-managed"}
         cmd = [self.uv, "sync", "--project", str(project), "--python", "3.12", "--no-dev"]
@@ -121,7 +124,7 @@ class EngineInstaller:
         self._stream(cmd, env, log, self._uv_line)
         self.done = 0.6
 
-        self.step = "Descargando los modelos"
+        self.step = t("Descargando los modelos")
         from .engine import model_env
 
         py = self.engine_dir / ".venv" / "Scripts" / "python.exe"
@@ -143,7 +146,8 @@ class EngineInstaller:
                 sizes.setdefault(ev["name"], ev["total"])
                 total = sum(sizes.values()) or 1
                 self.done = 0.6 + 0.4 * min(1.0, sum(got.values()) / total)
-                self.step = f"Descargando {ev['name']} ({ev['done'] >> 20} de {sizes[ev['name']] >> 20} MB)"
+                self.step = t("Descargando {name} ({done} de {total} MB)", name=ev["name"], done=ev["done"] >> 20,
+                              total=sizes[ev["name"]] >> 20)
             elif kind == "error":
                 failed.append(ev["message"])
         self._stream([str(py), "-m", "generator.fetch_models"], env, log, on_line, stdout_events=True)
@@ -162,9 +166,7 @@ class EngineInstaller:
         line = line.strip()
         m = re.match(r"(Downloading|Downloaded|Installed|Prepared|Using CPython|Resolved)\s+(.*)", line)
         if m:
-            self.step = {"Downloading": "Descargando", "Downloaded": "Descargado", "Installed": "Instalado",
-                         "Prepared": "Preparado", "Using CPython": "Python", "Resolved": "Resuelto"}[m.group(1)] \
-                + " " + m.group(2)[:60]
+            self.step = t(UV_STEPS[m.group(1)]) + " " + m.group(2)[:60]
             if m.group(1) in ("Downloaded", "Prepared"):
                 self.done = min(0.55, self.done + 0.01)
 
@@ -178,4 +180,5 @@ class EngineInstaller:
             log.write(line)
             on_line(line)
         if p.wait() != 0:
-            raise RuntimeError(f"{Path(cmd[0]).name} terminó con error {p.returncode} (ver {self.log})")
+            raise RuntimeError(t("{prog} terminó con error {code} (ver {log})", prog=Path(cmd[0]).name,
+                                 code=p.returncode, log=self.log))

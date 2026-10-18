@@ -16,6 +16,8 @@ import time
 from collections.abc import Callable
 from ctypes import wintypes
 
+from .i18n import t
+
 bt = ctypes.WinDLL("bthprops.cpl")  # BluetoothApis.dll no tiene BluetoothAuthenticateDevice
 
 
@@ -83,12 +85,12 @@ def find_radio() -> tuple[wintypes.HANDLE, BLUETOOTH_RADIO_INFO]:
     radio = wintypes.HANDLE()
     h = bt.BluetoothFindFirstRadio(ctypes.byref(params), ctypes.byref(radio))
     if not h:
-        raise RuntimeError("No hay adaptador Bluetooth (o está apagado).")
+        raise RuntimeError(t("No hay adaptador Bluetooth (o está apagado)."))
     bt.BluetoothFindRadioClose(h)
     info = BLUETOOTH_RADIO_INFO()
     info.dwSize = ctypes.sizeof(BLUETOOTH_RADIO_INFO)
     if bt.BluetoothGetRadioInfo(radio, ctypes.byref(info)) != 0:
-        raise RuntimeError("No se pudo leer el adaptador Bluetooth.")
+        raise RuntimeError(t("No se pudo leer el adaptador Bluetooth."))
     return radio, info
 
 
@@ -136,19 +138,19 @@ def pair(say: Callable[[str], None], stop: threading.Event | None = None, timeou
         if not is_wiimote(d):
             continue
         if d.fConnected and d.fAuthenticated:
-            say(f"{d.szName} ya está emparejado y conectado.")
+            say(t("{name} ya está emparejado y conectado.", name=d.szName))
             return True
         if d.fAuthenticated:
             paired[d.Address.ullLong] = last_seen(d)
         else:  # restos de intentos con PIN: impiden volver a encontrarlo
-            say(f"Borrando el emparejamiento anterior de {d.szName}")
+            say(t("Borrando el emparejamiento anterior de {name}", name=d.szName))
             bt.BluetoothRemoveDevice(ctypes.byref(d.Address))
 
     # PIN = dirección del PC, cada byte en un WCHAR (orden de rgBytes, el byte menos significativo primero)
     pin = ctypes.create_unicode_buffer("".join(chr(b) for b in info.address.rgBytes), 7)
-    hint = ("Ya estaba emparejada: si pulsas cualquier botón del Wiimote se conecta sola. Para emparejarla de nuevo, "
-            "pulsa el botón rojo de sync (bajo la tapa de las pilas). Buscando…" if paired else
-            "Pulsa el botón rojo de sync del Wiimote (bajo la tapa de las pilas). Buscando…")
+    hint = (t("Ya estaba emparejada: si pulsas cualquier botón del Wiimote se conecta sola. Para emparejarla de "
+              "nuevo, pulsa el botón rojo de sync (bajo la tapa de las pilas). Buscando…") if paired else
+            t("Pulsa el botón rojo de sync del Wiimote (bajo la tapa de las pilas). Buscando…"))
     say(hint)
     t0 = time.time()
     while time.time() - t0 < timeout_s and not stop.is_set():
@@ -156,7 +158,7 @@ def pair(say: Callable[[str], None], stop: threading.Event | None = None, timeou
             if not is_wiimote(d):
                 continue
             if d.fConnected and d.fAuthenticated:
-                say(f"{d.szName} ya está emparejado y conectado.")
+                say(t("{name} ya está emparejado y conectado.", name=d.szName))
                 return True
             key = d.Address.ullLong
             if key in paired and last_seen(d) == paired[key]:
@@ -164,18 +166,19 @@ def pair(say: Callable[[str], None], stop: threading.Event | None = None, timeou
             if d.fRemembered:  # responde a la búsqueda (botón rojo): se empareja de nuevo
                 bt.BluetoothRemoveDevice(ctypes.byref(d.Address))
                 paired.pop(key, None)
-            say(f"Encontrado {d.szName}, emparejando…")
+            say(t("Encontrado {name}, emparejando…", name=d.szName))
             r = bt.BluetoothAuthenticateDevice(None, radio, ctypes.byref(d), pin, 6)
             if r != 0:
-                say(f"Falló la autenticación (error {r}): vuelve a pulsar el botón rojo")
+                say(t("Falló la autenticación (error {r}): vuelve a pulsar el botón rojo", r=r))
                 continue
             r = bt.BluetoothSetServiceState(radio, ctypes.byref(d), ctypes.byref(HID_SERVICE), BLUETOOTH_SERVICE_ENABLE)
             if r != 0:
-                say(f"Emparejado, pero no se pudo activar como mando (error {r})")
+                say(t("Emparejado, pero no se pudo activar como mando (error {r})", r=r))
                 continue
-            say("¡Emparejado! Windows tarda unos segundos en instalarlo; luego la guitarra se conecta sola.")
+            say(t("¡Emparejado! Windows tarda unos segundos en instalarlo; luego la guitarra se conecta sola."))
             return True
         if not stop.is_set():
-            say(f"Buscando… {int(time.time() - t0)} s (si el Wiimote dejó de parpadear, pulsa otra vez el botón rojo)")
-    say("Cancelado." if stop.is_set() else "No se encontró ningún Wiimote. ¿Bluetooth activado? ¿Pilas?")
+            say(t("Buscando… {s} s (si el Wiimote dejó de parpadear, pulsa otra vez el botón rojo)",
+                  s=int(time.time() - t0)))
+    say(t("Cancelado.") if stop.is_set() else t("No se encontró ningún Wiimote. ¿Bluetooth activado? ¿Pilas?"))
     return False

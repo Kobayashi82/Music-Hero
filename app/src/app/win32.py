@@ -6,6 +6,8 @@ import ctypes
 import winreg
 from ctypes import wintypes
 
+from .i18n import N_, TrDict, t
+
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 winmm = ctypes.windll.winmm
@@ -28,13 +30,15 @@ VK = {"up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27, "enter": 0x0D, "spa
 VK |= {f"num{i}": 0x60 + i for i in range(10)}
 VK_NAMES = {v: k for k, v in VK.items()}
 # para enseñar las teclas en los menús
-LABELS = {"up": "Flecha arriba", "down": "Flecha abajo", "left": "Flecha izquierda", "right": "Flecha derecha",
-          "enter": "Intro", "space": "Espacio", "esc": "Esc", "backspace": "Retroceso", "tab": "Tab",
-          "pause": "Pausa", "scrolllock": "Bloq Despl", "insert": "Insert", "home": "Inicio", "end": "Fin",
-          "pageup": "Re Pág", "pagedown": "Av Pág", "delete": "Supr", "capslock": "Bloq Mayús",
-          "media_play": "Play/Pausa", "media_next": "Pista siguiente", "media_prev": "Pista anterior",
-          "media_stop": "Stop", "mute": "Silencio", "volume_down": "Bajar volumen", "volume_up": "Subir volumen",
-          "ctrl": "Ctrl", "alt": "Alt", "shift": "Mayús", "win": "Win"}
+LABELS = TrDict({"up": N_("Flecha arriba"), "down": N_("Flecha abajo"), "left": N_("Flecha izquierda"),
+                 "right": N_("Flecha derecha"), "enter": N_("Intro"), "space": N_("Espacio"), "esc": "Esc",
+                 "backspace": N_("Retroceso"), "tab": "Tab", "pause": N_("Pausa"), "scrolllock": N_("Bloq Despl"),
+                 "insert": "Insert", "home": N_("Inicio"), "end": N_("Fin"), "pageup": N_("Re Pág"),
+                 "pagedown": N_("Av Pág"), "delete": N_("Supr"), "capslock": N_("Bloq Mayús"),
+                 "media_play": N_("Play/Pausa"), "media_next": N_("Pista siguiente"),
+                 "media_prev": N_("Pista anterior"), "media_stop": "Stop", "mute": N_("Silencio"),
+                 "volume_down": N_("Bajar volumen"), "volume_up": N_("Subir volumen"), "ctrl": "Ctrl", "alt": "Alt",
+                 "shift": N_("Mayús"), "win": "Win"})
 VK_SHIFT, VK_CONTROL, VK_MENU = 0x10, 0x11, 0x12
 MODIFIER_VKS = {0x10: "shift", 0xA0: "shift", 0xA1: "shift", 0x11: "ctrl", 0xA2: "ctrl", 0xA3: "ctrl",
                 0x12: "alt", 0xA4: "alt", 0xA5: "alt", 0x5B: "win", 0x5C: "win"}
@@ -64,7 +68,7 @@ def vk_of(key: str) -> int:
         return 0x70 + int(key[1:]) - 1
     if key.startswith("vk_"):  # teclas sin nombre propio (ñ, signos...): su código
         return int(key[3:], 16)
-    raise ValueError(f"tecla no reconocida: {key!r}")
+    raise ValueError(t("tecla no reconocida: {key!r}", key=key))
 
 
 def key_of(vk: int) -> str:
@@ -170,7 +174,7 @@ def parse_hotkey(text: str) -> tuple[int, int]:
         else:
             vk = vk_of(part)
     if vk is None:
-        raise ValueError(f"falta la tecla en {text!r}")
+        raise ValueError(t("falta la tecla en {text!r}", text=text))
     return mods | MOD_NOREPEAT, vk
 
 

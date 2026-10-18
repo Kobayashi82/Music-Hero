@@ -26,6 +26,7 @@ class Config:
     keys: dict = field(default_factory=dict)  # teclas cambiadas en Ajustes (acción -> tecla; ver inputs.ACTIONS)
     library_dirs: list = field(default_factory=list)  # carpetas de música (Ajustes → Biblioteca)
     background: bool = True  # generar en segundo plano las canciones de esas carpetas que no tengan chart
+    language: str = "auto"  # auto (el de Windows) | es | en (i18n.py)
 
     @classmethod
     def load(cls) -> Config:

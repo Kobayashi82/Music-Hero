@@ -13,6 +13,8 @@ from collections.abc import Callable
 import numpy as np
 import soundfile as sf
 
+from .i18n import t
+
 SEARCH_MS = (-300, 1500)  # retardos posibles
 MIN_QUALITY = 0.5  # correlación normalizada mínima (con otro sonido a la vez o un ecualizador fuerte, baja)
 
@@ -56,7 +58,7 @@ def lag_ms(captured: np.ndarray, song: np.ndarray, sr: int, end_pos_ms: float) -
     hi = int((end_pos_ms - SEARCH_MS[0]) / 1000 * sr)
     seg = song[max(0, lo):max(0, hi)]
     if len(seg) < n:
-        raise ValueError("la posición está fuera de la canción")
+        raise ValueError(t("la posición está fuera de la canción"))
     size = 1 << int(np.ceil(np.log2(len(seg) + n)))
     corr = np.fft.irfft(np.fft.rfft(seg, size) * np.conj(np.fft.rfft(captured, size)), size)[:len(seg) - n + 1]
     energy = np.sqrt(np.convolve(seg ** 2, np.ones(n), "valid")) * np.sqrt((captured ** 2).sum()) + 1e-9
@@ -79,7 +81,7 @@ def measure(audio_file: str, position_at: Callable[[float], float], seconds: flo
             song = song_audio(audio_file, sr)
         lag, quality = lag_ms(captured, song, sr, position_at(end))
         if log:
-            log(f"retardo {lag:+.0f} ms (correlación {quality:.2f})")
+            log(t("retardo {lag:+.0f} ms (correlación {q:.2f})", lag=lag, q=quality))
         if quality >= MIN_QUALITY:
             lags.append(lag)
     return float(np.median(lags)) if lags else None

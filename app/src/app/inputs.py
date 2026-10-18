@@ -29,30 +29,31 @@ from ctypes import wintypes
 from dataclasses import dataclass
 
 from . import win32
+from .i18n import N_, TrDict, t
 from .starpower import Tilt
 
 # (acción, nombre en Ajustes, tecla por defecto, evento que da). Las globales funcionan siempre (también con el
 # juego oculto) y admiten Ctrl/Alt/Mayús/Win; las del juego, solo con el juego a la vista y sin modificadores.
 ACTIONS = [
-    ("toggle", "Mostrar / ocultar", "ctrl+alt+h", ("control", "toggle")),
-    ("quit", "Salir", "ctrl+alt+q", ("control", "quit")),
-    ("fret0", "Traste verde", "a", ("fret", 0)),
-    ("fret1", "Traste rojo", "s", ("fret", 1)),
-    ("fret2", "Traste amarillo", "d", ("fret", 2)),
-    ("fret3", "Traste azul", "f", ("fret", 3)),
-    ("fret4", "Traste naranja", "g", ("fret", 4)),
-    ("strum_up", "Strum arriba", "up", ("strum", -1)),
-    ("strum_down", "Strum abajo", "down", ("strum", 1)),
-    ("pause", "Menú (pausa)", "space", ("control", "pause")),
-    ("back", "Volver / pausa", "esc", ("control", "back")),
-    ("restart", "Reiniciar la canción", "backspace", ("control", "restart")),
-    ("difficulty", "Cambiar de dificultad", "tab", ("control", "difficulty")),
-    ("star", "Star power", "e", ("control", "star")),
-    ("enter", "Elegir", "enter", ("control", "enter")),
+    ("toggle", N_("Mostrar / ocultar"), "ctrl+alt+h", ("control", "toggle")),
+    ("quit", N_("Salir"), "ctrl+alt+q", ("control", "quit")),
+    ("fret0", N_("Traste verde"), "a", ("fret", 0)),
+    ("fret1", N_("Traste rojo"), "s", ("fret", 1)),
+    ("fret2", N_("Traste amarillo"), "d", ("fret", 2)),
+    ("fret3", N_("Traste azul"), "f", ("fret", 3)),
+    ("fret4", N_("Traste naranja"), "g", ("fret", 4)),
+    ("strum_up", N_("Strum arriba"), "up", ("strum", -1)),
+    ("strum_down", N_("Strum abajo"), "down", ("strum", 1)),
+    ("pause", N_("Menú (pausa)"), "space", ("control", "pause")),
+    ("back", N_("Volver / pausa"), "esc", ("control", "back")),
+    ("restart", N_("Reiniciar la canción"), "backspace", ("control", "restart")),
+    ("difficulty", N_("Cambiar de dificultad"), "tab", ("control", "difficulty")),
+    ("star", N_("Star power"), "e", ("control", "star")),
+    ("enter", N_("Elegir"), "enter", ("control", "enter")),
 ]
 GLOBAL_ACTIONS = ("toggle", "quit")
 DEFAULT_KEYS = {a: key for a, _, key, _ in ACTIONS}
-ACTION_NAMES = {a: name for a, name, _, _ in ACTIONS}
+ACTION_NAMES = TrDict({a: name for a, name, _, _ in ACTIONS})  # traducidos al leerlos
 ACTION_EVENTS = {a: ev for a, _, _, ev in ACTIONS}
 TEXT_CHARS = "abcdefghijklmnñopqrstuvwxyz0123456789 "
 BACKSPACE = "\b"  # en el buscador, Retroceso llega como InputEvent("char", BACKSPACE)
@@ -172,8 +173,8 @@ class KeyboardSource:
         win32.user32.PostThreadMessageW(self._thread_id, self._CAPTURE, 2 if with_mods is None else int(with_mods), 0)
 
     def _report(self, action: str) -> None:
-        text = (f"No se pudo usar {win32.combo_label(self.keys[action])} para «{ACTION_NAMES[action]}»: "
-                "la usa otra aplicación")
+        text = t("No se pudo usar {key} para «{name}»: la usa otra aplicación",
+                 key=win32.combo_label(self.keys[action]), name=ACTION_NAMES[action])
         self.errors.append(text)
         self.events.put(InputEvent(time.perf_counter(), "error", text))
 
