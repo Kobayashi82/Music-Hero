@@ -123,3 +123,7 @@ Phases 0–6 are done: the game, the chart generator, lyrics, AIMP sync, star po
 - [stable-ts](https://github.com/jianfch/stable-ts) and [Whisper](https://github.com/openai/whisper) for timing the lyrics, and [LRCLIB](https://lrclib.net/) for the lyrics text.
 - [Chorus Encore](https://www.enchor.us/) and its community charters, whose charts were used to train OnsetNet. None of their charts are distributed here.
 - [YARG](https://github.com/YARC-Official/YARG) and Clone Hero as references for timing windows, HOPOs and the `.chart` format.
+
+## License
+
+The code is under the [MIT License](LICENSE). The trained OnsetNet model will be published separately under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (no commercial use), because it was trained on community charts.

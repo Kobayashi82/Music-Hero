@@ -200,6 +200,7 @@ Que otros usuarios lo usen sin tocar nada: los modelos sacan solos chart y letra
 - [x] Emparejar la guitarra de Wii desde la propia app: Ajustes (y la bienvenida) → «Emparejar la guitarra de Wii», en un hilo con los avisos en el menú (`app/pairing.py`; `tools/pair_wiimote.py` lo usa). Si ya estaba emparejada y apagada no se borra (se conecta sola al pulsar un botón); solo se empareja de nuevo si responde a la búsqueda (botón rojo). Probado por el usuario (18-10-2026); falta probar el caso «emparejada y apagada».
 - [ ] Sin NVIDIA: en CPU son varios minutos por canción. Más adelante, OnsetNet y Demucs a ONNX con DirectML (AMD e Intel) y faster-whisper para la letra; si sale bien, el motor deja de necesitar torch y pesa mucho menos.
 - [x] Español e inglés (18-10-2026): textos de la app, consola, app.log, motor, `generate`/`lyrics` e instalador; el idioma de Windows o Ajustes → Idioma (Automático/Español/English). `t()` + `lang_en.py` en app y generador, con tests que avisan de lo que falte por traducir. También la vista previa (preview.html) y las herramientas de entrenamiento, dataset y exámenes.
+- [x] Licencia (18-10-2026): código MIT (LICENSE); el modelo OnsetNet irá aparte con CC BY-NC 4.0. README en inglés (README.md) y español (README.es.md) con una captura real del juego.
 - [ ] Ejecutable sin firmar: SmartScreen avisará; valorar firma de código.
 
 **Terminado cuando:** en un Windows limpio (otro PC o máquina virtual), instalar, añadir una carpeta y jugar una canción con chart y letra generadas sin abrir una consola.

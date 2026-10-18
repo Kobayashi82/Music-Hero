@@ -123,3 +123,7 @@ Las fases 0 a 6 están terminadas: el juego, el generador de charts, la letra, l
 - [stable-ts](https://github.com/jianfch/stable-ts) y [Whisper](https://github.com/openai/whisper), por sincronizar la letra, y [LRCLIB](https://lrclib.net/), por el texto de la letra.
 - [Chorus Encore](https://www.enchor.us/) y su comunidad de charters, con cuyas charts se entrenó OnsetNet. Aquí no se distribuye ninguna de sus charts.
 - [YARG](https://github.com/YARC-Official/YARG) y Clone Hero, como referencia para las ventanas de acierto, los HOPO y el formato `.chart`.
+
+## Licencia
+
+El código tiene [licencia MIT](LICENSE). El modelo OnsetNet entrenado se publicará aparte con [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/deed.es) (sin uso comercial), porque se entrenó con charts de la comunidad.
