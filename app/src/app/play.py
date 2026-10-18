@@ -561,7 +561,8 @@ class Session(QObject):
                      "progress": min(1.0, self.calib.position_ms() / calibration.click_times_ms()[-1])}
         burn = self.game.sustaining_frets
         return {
-            "notes": notes, "beats": beats, "held": self.held if not self.menus else [False] * 5,  # en los menús no se encienden los botones "time": now,
+            "notes": notes, "beats": beats, "time": now,
+            "held": self.held if not self.menus else [False] * 5,  # en los menús no se encienden los botones
             "flash": [max(0.0, 1 - (now - ft) / 0.3) for ft in self.flash_t],
             "burn": [i in burn for i in range(5)],
             "missFlash": max(0.0, 1 - (now - self.miss_t) / 0.35),
