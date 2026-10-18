@@ -14,6 +14,8 @@ solo para las dificultades que falten, o para todo si no encaja con el audio; --
 Caché: si out/<canción>/chart.json ya es de ese mismo audio (hash) y de esta versión del generador
 y del modelo, la canción se salta; --force la rehace. Los stems de Demucs se guardan para no repetirlo
 (~50 MB por canción); --drop-stems los borra al terminar.
+También hace la letra sincronizada (lyrics.json, ver generator/lyrics.py), y la añade a las charts ya
+hechas que no la tengan; --no-lyrics la desactiva.
 """
 
 import argparse
@@ -147,9 +149,10 @@ def up_to_date(out: Path, sha: str, version: str, clonehero: bool = False) -> bo
 def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str = "cuda",
              human_chart: Path | None = None, model_path: Path | None = None, force: bool = False,
              max_nps: dict[str, float] | None = None, drop_stems: bool = False, tag: str = "",
-             out_dir: Path | None = None, use_library: bool = True) -> Path | None:
+             out_dir: Path | None = None, use_library: bool = True, lyrics: bool = True) -> Path | None:
     """Genera la chart de una canción. Devuelve su carpeta, o None si ya estaba hecha (caché).
-    use_library: sin human_chart, usar la chart humana de la biblioteca si está bajada."""
+    use_library: sin human_chart, usar la chart humana de la biblioteca si está bajada.
+    lyrics: hacer también lyrics.json (generator.lyrics), también si la chart ya estaba y le falta."""
     from .audio import song_info
 
     t0 = time.perf_counter()
@@ -164,6 +167,8 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     out = out_dir or out_dir_for(audio, song.audio_sha256, out_root)
     if not force and up_to_date(out, song.audio_sha256, version, clonehero):
         print(f"{tag}{audio.name}: ya hecha ({out.name})", flush=True)
+        if lyrics:
+            _lyrics(out, device, drop_stems, step)
         return None
     print(f"{tag}{song.artist} - {song.title}  ({song.duration_ms / 1000:.0f} s)", flush=True)
 
@@ -234,10 +239,27 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     write_preview(out / "preview.html", song, tempo, notes, sections, source, version, difficulties)
     if clonehero:
         write_clonehero(out / "clonehero", song, tempo, difficulties, sections)
+    if lyrics:
+        _lyrics(out, device, False, step)
     if drop_stems:
         shutil.rmtree(out / "stems", ignore_errors=True)
     step(f"listo: {out}")
     return out
+
+
+def _lyrics(out: Path, device: str, drop_stems: bool, step) -> None:
+    """lyrics.json de la chart (si falta o es de otra versión). Un fallo no estropea la chart, solo se avisa."""
+    from .lyrics import lyrics_for
+
+    try:
+        d = lyrics_for(out, device)
+    except Exception as e:  # noqa: BLE001 - p. ej. LRCLIB caído: se hará en otra pasada
+        step(f"letra: error {type(e).__name__}: {e}")
+        return
+    if d is not None:
+        step(f"letra: {d['source']}, {len(d['lines'])} líneas")
+        if drop_stems:  # los stems se habían vuelto a separar solo para la letra
+            shutil.rmtree(out / "stems", ignore_errors=True)
 
 
 def _worker(kw: dict) -> tuple[str, str, float]:
@@ -281,6 +303,7 @@ def main() -> int:
                         help="notas/s como mucho en 2 s, p. ej. 'expert=14,hard=8,medium=5,easy=3.5'")
     parser.add_argument("--max-minutes", type=float, help="saltar las canciones que duren más de esto")
     parser.add_argument("--drop-stems", action="store_true", help="borrar los stems al terminar cada canción")
+    parser.add_argument("--no-lyrics", action="store_true", help="sin letra sincronizada (lyrics.json)")
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
@@ -303,7 +326,7 @@ def main() -> int:
         parser.error("no hay archivos de audio")
     common = dict(out_root=args.out, clonehero=args.clonehero, device="cpu" if args.cpu else "cuda",
                   human_chart=args.human, model_path=model, force=args.force, max_nps=args.max_nps,
-                  drop_stems=args.drop_stems, use_library=not args.no_human)
+                  drop_stems=args.drop_stems, use_library=not args.no_human, lyrics=not args.no_lyrics)
     if len(files) == 1:
         generate(files[0], **common)
         return 0

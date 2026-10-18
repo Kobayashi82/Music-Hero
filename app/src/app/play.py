@@ -30,6 +30,7 @@ from .config import Config
 from .gameplay import HIT, MISSED, SKIPPED, Game
 from .inputs import Inputs
 from .library import Entry, group, scan
+from .lyrics import Lyrics
 from .menu import Menu, Option, cycler, stepper
 from .player import Player
 from .records import Play, Records
@@ -83,6 +84,7 @@ class Session(QObject):
         if self.player:
             self.player.close()
         self.chart, self.player = chart, player
+        self.lyrics = Lyrics.load(chart.folder, chart.audio_sha256)
         d = difficulty or self.records.difficulty(chart.audio_sha256) or self.cfg.difficulty
         self.difficulty = d if d in chart.difficulties else next(iter(chart.difficulties))
         self.beats = chart.beats
@@ -320,6 +322,9 @@ class Session(QObject):
                    change=num("highway_width", 40, 320, 1200, self.place)),
             Option("Posición", value=lambda: POSITIONS.get(cfg.position, cfg.position),
                    change=cycler(list(POSITIONS), lambda: cfg.position, set_position)),
+            Option("Letra", value=lambda: "Sí" if cfg.lyrics else "No",
+                   change=cycler([False, True], lambda: cfg.lyrics,
+                                 lambda v: (setattr(cfg, "lyrics", v), cfg.save()))),
             Option("Volver", self.menu_back),
         ], body="Elige una opción para cambiarla con el strum; se guarda sola.")
 
@@ -492,10 +497,13 @@ class Session(QObject):
             self.menus = [self.results_menu()]
 
         travel = TRAVEL_MS / max(0.3, self.cfg.note_speed)
+        lyrics = {}
         if self.calib:
             notes, beats = self.calib_notes(now, travel)
         else:
             notes, beats = self.song_notes(now, travel)
+            if self.cfg.lyrics and self.lyrics:
+                lyrics = self.lyrics.view(self.player.position_ms(now + self.cfg.video_offset_ms / 1000))
 
         st = self.game.stats
         countdown = 0.0
@@ -523,6 +531,7 @@ class Session(QObject):
             "menuHint": (LONG_HINT if self.menus[-1].long else MENU_HINT) if menu else "",
             "toast": self.toast_text if now < self.toast_until else "",
             "message": self.message, "opacity": self.cfg.opacity, "hwWidth": self.cfg.highway_width,
+            "lyricsOn": self.cfg.lyrics, "lyrics": lyrics,
         }
 
     def calib_notes(self, now: float, travel: float) -> tuple[list, list]:

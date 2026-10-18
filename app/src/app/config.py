@@ -20,6 +20,7 @@ class Config:
     position: str = "center"  # center | left | right
     opacity: float = 0.95  # del fondo de la autopista
     volume: float = 1.0
+    lyrics: bool = True  # letra bajo la autopista (sube la autopista para dejarle sitio)
 
     @classmethod
     def load(cls) -> Config:

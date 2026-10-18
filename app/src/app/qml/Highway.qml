@@ -3,7 +3,8 @@
 //          1 = horizonte; estado 0 pendiente, 1 acertada, 2 fallada)
 //   beats: [u, inicioDeCompás] x N, held / burn (sustain sonando): 5 bool, flash / missLane: 5 (0..1),
 //   time (s, para el parpadeo de las llamas), el marcador, menu (title, body, items, values, sel, editing;
-//   vacío si no hay), calib, toast y message.
+//   vacío si no hay), calib, toast, message, lyricsOn y lyrics (current, fill = caracteres ya cantados,
+//   con decimales, y next; vacío si no hay letra).
 import QtQuick
 import QtQuick.Shapes
 
@@ -13,14 +14,16 @@ Item {
                        score: 0, streak: 0, mult: 1, accuracy: 1, title: "", difficulty: "", message: "",
                        progress: 0, countdown: 0, menu: ({}), menuHint: "", calib: ({}), toast: "",
                        opacity: 0.85, missFlash: 0, missLane: [0, 0, 0, 0, 0], burn: [false, false, false, false, false],
-                       time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560 })
+                       time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560,
+                       lyricsOn: false, lyrics: ({}) })
     readonly property var colors: ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
     readonly property var multColors: ["white", "#ffdc00", "#2ecc40", "#c86cff"]
     readonly property real farScale: 0.38
     readonly property real k: 1 / farScale - 1
     property real hwNear: Math.min(width - 640, f.hwWidth)  // play.SIDE_MARGIN: sitio para el marcador
     readonly property real laneW: hwNear / 5
-    readonly property real strikeY: height - Math.max(110, height * 0.1)
+    readonly property real lyricsH: f.lyricsOn ? 96 : 0  // sitio para la letra, debajo
+    readonly property real strikeY: height - Math.max(110, height * 0.1) - lyricsH
     readonly property real horizonY: height * 0.06
     readonly property int notePool: 200
     readonly property int beatPool: 32
@@ -312,6 +315,54 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter; y: 30; width: parent.width - 24; height: 4; radius: 2
             color: "#44ffffff"
             Rectangle { width: parent.width * root.f.progress; height: parent.height; radius: 2; color: "white" }
+        }
+    }
+    // ---------- letra: la línea que se canta (se va llenando de amarillo) y la siguiente ----------
+    Item {
+        id: lyricsBox
+        readonly property string cur: root.f.lyricsOn && root.f.lyrics.current ? root.f.lyrics.current : ""
+        readonly property string nxt: cur !== "" && root.f.lyrics.next ? root.f.lyrics.next : ""
+        readonly property real avail: root.width - 80
+        visible: cur !== ""
+        anchors.fill: parent
+        TextMetrics { id: curMetrics; font.pixelSize: 30; font.bold: true; text: lyricsBox.cur }
+        TextMetrics { id: nextMetrics; font.pixelSize: 20; text: lyricsBox.nxt }
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom; anchors.bottomMargin: 12
+            width: Math.min(lyricsBox.avail, Math.max(curText.contentWidth, nextText.contentWidth)) + 40
+            height: lyricsBox.nxt !== "" ? 84 : 56; radius: 12
+            color: Qt.rgba(0.03, 0.03, 0.09, Math.max(0.8, root.f.opacity)); border.color: "#30ffffff"
+            Text {
+                id: curText
+                anchors.horizontalCenter: parent.horizontalCenter; y: 9
+                width: lyricsBox.avail; horizontalAlignment: Text.AlignHCenter
+                text: lyricsBox.cur; color: "#e6ffffff"; font.bold: true
+                font.pixelSize: Math.max(14, Math.min(30, Math.floor(30 * lyricsBox.avail / Math.max(1, curMetrics.advanceWidth))))
+                FontMetrics { id: curFont; font: curText.font }
+                readonly property real fillX: {  // hasta dónde va lo cantado, en x de este Text (centrado)
+                    var fl = root.f.lyrics.fill || 0, i = Math.floor(fl), n = text.length
+                    if (fl <= 0 || n === 0) return 0
+                    var x0 = (width - curFont.advanceWidth(text)) / 2
+                    if (i >= n) return width
+                    var a = curFont.advanceWidth(text.substring(0, i))
+                    var b = curFont.advanceWidth(text.substring(0, i + 1))
+                    return x0 + a + (b - a) * (fl - i)
+                }
+                Item {  // lo ya cantado: la misma línea en amarillo, recortada hasta donde va
+                    width: curText.fillX; height: curText.height; clip: true
+                    Text { width: curText.width; horizontalAlignment: Text.AlignHCenter; text: curText.text
+                           color: "#ffdc00"; font.bold: true; font.pixelSize: curText.font.pixelSize }
+                }
+            }
+            Text {
+                id: nextText
+                anchors.horizontalCenter: parent.horizontalCenter; y: 50
+                visible: lyricsBox.nxt !== ""
+                width: lyricsBox.avail; horizontalAlignment: Text.AlignHCenter
+                text: lyricsBox.nxt; color: "#99ffffff"
+                font.pixelSize: Math.max(12, Math.min(20, Math.floor(20 * lyricsBox.avail / Math.max(1, nextMetrics.advanceWidth))))
+            }
         }
     }
     Text {

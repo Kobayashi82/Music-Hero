@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "music-hero/lyrics/v1",
+  "title": "Music Hero lyrics v1",
+  "description": "Letra sincronizada palabra a palabra (lyrics.json, junto a chart.json). Todos los tiempos en milisegundos (int) desde el inicio del audio. Cualquier cambio incompatible sube schema_version.",
+  "type": "object",
+  "required": ["schema_version", "audio_sha256", "generator", "source", "lines"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "audio_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "El mismo que song.audio_sha256 de chart.json; si no coincide, la letra es de otro audio." },
+
+    "generator": {
+      "type": "object",
+      "required": ["version", "created"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string", "description": "Versión del algoritmo; si cambia, se rehace." },
+        "created": { "type": "string", "format": "date-time" },
+        "model": { "type": "string", "description": "Modelo de Whisper usado." }
+      }
+    },
+
+    "source": {
+      "enum": ["lrclib", "lrclib+whisper", "whisper", "instrumental", "none"],
+      "description": "lrclib: texto de LRCLIB ajustado a la voz. lrclib+whisper: texto de LRCLIB con los tiempos de la transcripción (el ajuste directo no encajó). whisper: transcripción, puede tener errores. instrumental / none: sin letra (lines vacío)."
+    },
+    "language": { "type": "string", "description": "Idioma detectado (código de Whisper: en, es, ja...)." },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "Confianza media de Whisper en las palabras." },
+    "matched": { "type": "number", "minimum": 0, "maximum": 1, "description": "Solo lrclib+whisper: parte del texto encontrada en la transcripción." },
+    "lrclib_id": { "type": "integer" },
+    "seconds": { "type": "number", "minimum": 0, "description": "Lo que tardó, informativo." },
+
+    "lines": {
+      "type": "array",
+      "description": "Líneas en orden, sin solaparse. Cada una cabe en una fila bajo la autopista.",
+      "items": {
+        "type": "object",
+        "required": ["start_ms", "end_ms", "text", "words"],
+        "additionalProperties": false,
+        "properties": {
+          "start_ms": { "type": "integer", "minimum": 0 },
+          "end_ms": { "type": "integer", "minimum": 0 },
+          "text": { "type": "string", "minLength": 1 },
+          "words": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Palabras en orden (en japonés o chino, letras o grupos de letras). Sus textos seguidos, sin los espacios de los extremos, dan text (cada una lleva delante su espacio, si lo hay).",
+            "items": {
+              "type": "object",
+              "required": ["start_ms", "end_ms", "text"],
+              "additionalProperties": false,
+              "properties": {
+                "start_ms": { "type": "integer", "minimum": 0 },
+                "end_ms": { "type": "integer", "minimum": 0 },
+                "text": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
