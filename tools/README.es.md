@@ -11,6 +11,7 @@ Utilidades de consola para diagnóstico, el dataset de entrenamiento y los exám
 | `pair_wiimote.py` | Empareja un Wiimote con Windows sin teclear el PIN que pide Windows 11 (el juego hace lo mismo desde *Ajustes → Guitarra y teclas*). |
 | `wii_guitar_monitor.py` | Enseña cada cambio que manda la guitarra de Wii (trastes, strum, palanca, Start/Select) con los bytes en crudo. Para cuando un botón no responde. |
 | `wii_tilt_monitor.py [segundos]` | Enseña el acelerómetro del Wiimote mientras levantas la guitarra, para comprobar o reajustar el umbral del star power. |
+| `readme_image.py <juego.png> <salida.png> <artista> <título>` | Monta la imagen del README: una captura del juego con transparencia (`play --screenshot`) sobre un escritorio dibujado. Los pasos, en el script. |
 | `measure_aimp_latency.py [segundos] [veces]` | Mide cuánto va por detrás lo que se oye de la posición que da AIMP (el juego lo mide solo mientras sigue a AIMP). |
 
 ```

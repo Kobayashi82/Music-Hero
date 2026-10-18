@@ -11,6 +11,7 @@ Command-line helpers for diagnostics, the training dataset and model evaluation.
 | `pair_wiimote.py` | Pairs a Wiimote with Windows without typing the PIN Windows 11 asks for (the game does the same from *Settings → Guitar and keys*). |
 | `wii_guitar_monitor.py` | Prints every change the Wii guitar sends (frets, strum, whammy, Start/Select) with the raw bytes. Use it if a button doesn't register. |
 | `wii_tilt_monitor.py [seconds]` | Shows the Wiimote's accelerometer while you tilt the guitar up, to check or retune the star power threshold. |
+| `readme_image.py <game.png> <out.png> <artist> <title>` | Builds the README picture: a transparent game capture (`play --screenshot`) over a drawn desktop. Steps in the script. |
 | `measure_aimp_latency.py [seconds] [times]` | Measures how far behind AIMP's reported position the sound you hear is (the game measures it by itself while following AIMP). |
 
 ```

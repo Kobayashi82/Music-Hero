@@ -349,7 +349,7 @@ Item {
         readonly property bool onRight: root.f.hudSide === "right"
         LayoutMirroring.enabled: onRight
         LayoutMirroring.childrenInherit: true
-        readonly property real uB: -0.05
+        readonly property real uB: Math.max(-0.05, root.uAtY(root.height - 12))  // sin salirse por abajo
         readonly property real sB: root.laneW * root.s(uB)
         readonly property real inner: onRight ? 4.8 : -0.8  // borde junto al raíl, en carriles (acaban en -0.62 / 4.62)
         readonly property real outer: onRight ? Math.min(2 + (root.width / 2 - 16) / sB, inner + 300 / root.laneW)

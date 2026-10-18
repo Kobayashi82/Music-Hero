@@ -1661,8 +1661,8 @@ def main() -> int:
     idle.timeout.connect(lambda: None if view.isVisible() else session.idle_inputs())
     idle.start(50)
     if args.screenshot:
-        def shot() -> None:
-            app.primaryScreen().grabWindow(0).save(str(args.screenshot))
+        def shot() -> None:  # solo la ventana del juego, con su transparencia (tools/readme_image.py le pone fondo)
+            view.grabWindow().save(str(args.screenshot))
             app.quit()
         if args.screenshot_menu:
             QTimer.singleShot(int(args.screenshot_at * 1000) - 300, bridge.session.pause)
