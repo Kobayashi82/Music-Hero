@@ -41,13 +41,36 @@ def stage() -> None:
     sys.path.insert(0, str(REPO / "app" / "src"))
     from PySide6.QtWidgets import QApplication
 
-    from app.play import tray_icon
+    from app.play import icon_pixmap
 
     app = QApplication.instance() or QApplication([])  # noqa: F841 - QPixmap necesita la aplicación
-    icon = tray_icon()
-    pix = icon.pixmap(256, 256)
-    if not pix.save(str(STAGE / "music_hero.ico"), "ICO"):
+    write_ico(STAGE / "music_hero.ico", [png_bytes(icon_pixmap(s)) for s in ICO_SIZES])
+
+
+ICO_SIZES = (16, 24, 32, 48, 64, 256)
+
+
+def png_bytes(pix) -> bytes:
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+    data = QByteArray()
+    buf = QBuffer(data)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    if not pix.save(buf, "PNG"):
         sys.exit("no se pudo guardar el icono")
+    return bytes(data)
+
+
+def write_ico(path: Path, pngs: list[bytes]) -> None:
+    """.ico con varios tamaños (Qt solo escribe uno): cabecera, una entrada por tamaño y cada imagen en PNG."""
+    import struct
+
+    out = struct.pack("<HHH", 0, 1, len(pngs))
+    offset = 6 + 16 * len(pngs)
+    for size, png in zip(ICO_SIZES, pngs):
+        out += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(png), offset)
+        offset += len(png)
+    path.write_bytes(out + b"".join(pngs))
 
 
 def size_mb(path: Path) -> float:

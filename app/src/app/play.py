@@ -31,7 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
-from PySide6.QtCore import QObject, QPointF, Qt, QTimer, QUrl, Slot
+from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap, QPolygonF, QSurfaceFormat
 from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QSystemTrayIcon
@@ -1369,24 +1369,33 @@ class Bridge(QObject):
             self.session.menu_back()
 
 
-def tray_icon() -> QIcon:
-    """La autopista en pequeño: cinco carriles de colores que se juntan hacia arriba, sobre fondo oscuro."""
-    pix = QPixmap(64, 64)
+def icon_pixmap(size: int) -> QPixmap:
+    """La autopista en pequeño: cinco carriles de colores que se juntan hacia arriba, sin fondo. Se dibuja en
+    una rejilla de 64 escalada a size (nítido también a 256 para el icono del .exe)."""
+    pix = QPixmap(size, size)
     pix.fill(Qt.GlobalColor.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.scale(size / 64, size / 64)
     p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QColor("#151527"))
-    p.drawRoundedRect(2, 2, 60, 60, 14, 14)
     colors = ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
-    for i, c in enumerate(colors):  # abajo de 8 a 56, arriba de 22 a 42
-        x0, x1 = 8 + i * 9.6, 22 + i * 4
+    for i, c in enumerate(colors):  # abajo de 2 a 62, arriba de 19 a 45
+        x0, x1 = 2 + i * 12, 19 + i * 5.2
         p.setBrush(QColor(c))
-        p.drawPolygon(QPolygonF([QPointF(x0 + 1, 54), QPointF(x0 + 8.6, 54), QPointF(x1 + 3.5, 10), QPointF(x1 + 0.5, 10)]))
+        p.drawPolygon(QPolygonF([QPointF(x0 + 1, 62), QPointF(x0 + 11, 62), QPointF(x1 + 4.6, 2), QPointF(x1 + 0.6, 2)]))
+    p.setBrush(QColor("#151527"))  # la línea de golpeo, blanca con borde oscuro: se ve en barras claras y oscuras
+    p.drawRect(QRectF(1, 46, 62, 7))
     p.setBrush(QColor("white"))
-    p.drawRect(8, 44, 48, 3)  # la línea de golpeo
+    p.drawRect(QRectF(2, 47.5, 60, 4))
     p.end()
-    return QIcon(pix)
+    return pix
+
+
+def tray_icon() -> QIcon:
+    icon = QIcon()
+    for s in (16, 24, 32, 48, 64, 256):
+        icon.addPixmap(icon_pixmap(s))
+    return icon
 
 
 def make_tray(app: QApplication, session: Session) -> QSystemTrayIcon | None:

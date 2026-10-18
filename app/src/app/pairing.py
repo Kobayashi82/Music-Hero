@@ -115,6 +115,13 @@ def is_wiimote(d: BLUETOOTH_DEVICE_INFO) -> bool:
     return d.szName.startswith("Nintendo RVL-")
 
 
+def last_seen(d: BLUETOOTH_DEVICE_INFO) -> tuple:
+    """Cuándo lo vio Windows por última vez: cambia si responde a una búsqueda. Se compara consigo mismo, no
+    con la hora (así da igual si va en UTC o en hora local)."""
+    t = d.stLastSeen
+    return (t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds)
+
+
 def pair(say: Callable[[str], None], stop: threading.Event | None = None, timeout_s: float = 120) -> bool:
     """Busca el Wiimote (hay que pulsar su botón rojo de sync) y lo empareja. say(texto): cada aviso.
     stop: para cancelar. True si queda emparejado (o ya lo estaba)."""
@@ -124,14 +131,25 @@ def pair(say: Callable[[str], None], stop: threading.Event | None = None, timeou
     except RuntimeError as e:
         say(str(e))
         return False
-    for d in devices(radio, inquiry=False):  # restos de intentos con PIN: impiden volver a encontrarlo
-        if is_wiimote(d) and not d.fConnected:
+    paired = {}  # Wiimotes ya emparejados (apagados, quizá): dirección -> última vez visto
+    for d in devices(radio, inquiry=False):
+        if not is_wiimote(d):
+            continue
+        if d.fConnected and d.fAuthenticated:
+            say(f"{d.szName} ya está emparejado y conectado.")
+            return True
+        if d.fAuthenticated:
+            paired[d.Address.ullLong] = last_seen(d)
+        else:  # restos de intentos con PIN: impiden volver a encontrarlo
             say(f"Borrando el emparejamiento anterior de {d.szName}")
             bt.BluetoothRemoveDevice(ctypes.byref(d.Address))
 
     # PIN = dirección del PC, cada byte en un WCHAR (orden de rgBytes, el byte menos significativo primero)
     pin = ctypes.create_unicode_buffer("".join(chr(b) for b in info.address.rgBytes), 7)
-    say("Pulsa el botón rojo de sync del Wiimote (bajo la tapa de las pilas). Buscando…")
+    hint = ("Ya estaba emparejada: si pulsas cualquier botón del Wiimote se conecta sola. Para emparejarla de nuevo, "
+            "pulsa el botón rojo de sync (bajo la tapa de las pilas). Buscando…" if paired else
+            "Pulsa el botón rojo de sync del Wiimote (bajo la tapa de las pilas). Buscando…")
+    say(hint)
     t0 = time.time()
     while time.time() - t0 < timeout_s and not stop.is_set():
         for d in devices(radio, inquiry=True):
@@ -140,8 +158,12 @@ def pair(say: Callable[[str], None], stop: threading.Event | None = None, timeou
             if d.fConnected and d.fAuthenticated:
                 say(f"{d.szName} ya está emparejado y conectado.")
                 return True
-            if d.fRemembered:
+            key = d.Address.ullLong
+            if key in paired and last_seen(d) == paired[key]:
+                continue  # emparejado pero sin responder (apagado): no se toca, se conecta solo al encenderlo
+            if d.fRemembered:  # responde a la búsqueda (botón rojo): se empareja de nuevo
                 bt.BluetoothRemoveDevice(ctypes.byref(d.Address))
+                paired.pop(key, None)
             say(f"Encontrado {d.szName}, emparejando…")
             r = bt.BluetoothAuthenticateDevice(None, radio, ctypes.byref(d), pin, 6)
             if r != 0:
