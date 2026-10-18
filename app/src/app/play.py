@@ -37,6 +37,7 @@ LEAD_IN_MS = 2500.0
 RESUME_MS = 1500.0  # cuenta atrás al quitar la pausa
 SWITCH_AHEAD_MS = 400.0  # al cambiar de dificultad jugando, las notas más cercanas no cuentan
 TOAST_S = 2.5
+CALIB_LANE = 2  # las notas de la calibración bajan por el carril amarillo (el del centro)
 MENU_HINT = "Strum: mover · Verde / +: elegir · Rojo / −: volver"
 POSITIONS = {"left": "Izquierda", "center": "Centro", "right": "Derecha"}
 
@@ -50,10 +51,12 @@ class Session(QObject):
         self.held = [False] * 5
         self.flash_t = [0.0] * 5
         self.miss_t = 0.0
+        self.miss_lane_t = [0.0] * 5
         self.resume_at: float | None = None
         self.menus: list[Menu] = []
         self.calib: Player | None = None
         self.calib_strums: list[float] = []
+        self.calib_hits: set[int] = set()  # notas de la calibración ya rasgueadas
         self.results = ""
         self.toast_text, self.toast_until = "", 0.0
         self.guitar_connected: bool | None = None
@@ -183,6 +186,8 @@ class Session(QObject):
                    change=num("highway_width", 40, 320, 1200, self.place)),
             Option("Posición", value=lambda: POSITIONS.get(cfg.position, cfg.position),
                    change=cycler(list(POSITIONS), lambda: cfg.position, set_position)),
+            Option("Tocar solo (demo)", value=lambda: "Sí" if self.autoplay else "No",
+                   change=cycler([False, True], lambda: self.autoplay, lambda v: setattr(self, "autoplay", v))),
             Option("Volver", self.menu_back),
         ], body="Elige una opción para cambiarla con el strum; se guarda sola.")
 
@@ -206,6 +211,7 @@ class Session(QObject):
         sr = 48000
         self.calib = Player((calibration.click_track(sr), sr), self.cfg.audio_offset_ms, 0, max(0.5, self.cfg.volume))
         self.calib_strums = []
+        self.calib_hits = set()
         self.calib.play()
 
     def stop_calibration(self) -> None:
@@ -267,7 +273,12 @@ class Session(QObject):
 
     def calib_input(self, ev) -> None:
         if ev.kind == "strum" or (ev.kind == "control" and ev.value == "enter"):
-            self.calib_strums.append(self.calib.position_ms(ev.t))
+            ms = self.calib.position_ms(ev.t)
+            self.calib_strums.append(ms)
+            i = calibration.nearest(ms)
+            if i is not None and i not in self.calib_hits:
+                self.calib_hits.add(i)
+                self.flash_t[CALIB_LANE] = ev.t
         elif (ev.kind == "control" and ev.value in ("select", "restart", "start", "pause")) or (
                 ev.kind == "fret" and ev.down and ev.value == 1):
             self.stop_calibration()
@@ -332,16 +343,64 @@ class Session(QObject):
             if kind == "hit":
                 for f in ns.note.frets:
                     self.flash_t[f] = now
-            elif kind == "miss" or kind == "overstrum":
+            else:  # fallo o strum de más: se marca el carril de la nota (o los trastes pulsados)
                 self.miss_t = now
+                lanes = ns.note.frets if ns is not None else [i for i, h in enumerate(self.held) if h]
+                for f in lanes:
+                    self.miss_lane_t[f] = now
         self.game.events.clear()
         if not self.results and (self.game.finished and t > self.chart.duration_ms - 500 or self.player.finished):
             self.results = self.summary()
             self.player.pause()
             self.menus = [self.results_menu()]
 
-        tv = self.player.position_ms(now + self.cfg.video_offset_ms / 1000)
         travel = TRAVEL_MS / max(0.3, self.cfg.note_speed)
+        if self.calib:
+            notes, beats = self.calib_notes(now, travel)
+        else:
+            notes, beats = self.song_notes(now, travel)
+
+        st = self.game.stats
+        countdown = 0.0
+        if self.resume_at is not None:
+            countdown = self.resume_at - now
+        elif self.player.playing and t < 0 and not self.game.stats.hits:
+            countdown = -t / 1000
+        menu = self.menus[-1].view() if self.menus and not self.calib else {}
+        calib = {}
+        if self.calib:
+            calib = {"taps": len(self.calib_hits), "total": calibration.CLICKS,
+                     "progress": min(1.0, self.calib.position_ms() / calibration.click_times_ms()[-1])}
+        burn = self.game.sustaining_frets
+        return {
+            "notes": notes, "beats": beats, "held": self.held, "time": now,
+            "flash": [max(0.0, 1 - (now - ft) / 0.3) for ft in self.flash_t],
+            "burn": [i in burn for i in range(5)],
+            "missFlash": max(0.0, 1 - (now - self.miss_t) / 0.35),
+            "missLane": [max(0.0, 1 - (now - mt) / 0.4) for mt in self.miss_lane_t],
+            "score": st.score, "streak": st.streak, "mult": st.multiplier, "accuracy": st.accuracy,
+            "title": f"{self.chart.artist} – {self.chart.title}", "difficulty": DIFF_NAMES[self.difficulty],
+            "autoplay": self.autoplay,
+            "progress": max(0.0, min(1.0, t / max(1, self.chart.duration_ms))),
+            "countdown": countdown, "menu": menu, "menuHint": MENU_HINT if menu else "", "calib": calib,
+            "toast": self.toast_text if now < self.toast_until else "",
+            "message": self.message, "opacity": self.cfg.opacity, "hwWidth": self.cfg.highway_width,
+        }
+
+    def calib_notes(self, now: float, travel: float) -> tuple[list, list]:
+        """Una nota por clic medido, en el carril del centro; las rasgueadas desaparecen."""
+        tv = self.calib.position_ms(now + self.cfg.video_offset_ms / 1000)
+        notes, beats = [], []
+        for i, c in enumerate(calibration.scored_clicks_ms()):
+            u = (c - tv) / travel
+            if -BEHIND_MS / travel <= u <= 1.02:
+                beats += [u, 1]
+                if i not in self.calib_hits:
+                    notes += [CALIB_LANE, u, u, 2 if u < -calibration.MAX_DEV_MS / travel else 0, 0, 0, 1]
+        return notes, beats
+
+    def song_notes(self, now: float, travel: float) -> tuple[list, list]:
+        tv = self.player.position_ms(now + self.cfg.video_offset_ms / 1000)
         notes = []
         start = bisect.bisect_left(self.times, tv - BEHIND_MS - self.max_sustain)
         for ns in self.game.notes[start:]:
@@ -368,29 +427,7 @@ class Session(QObject):
             if u > 1.02:
                 break
             beats += [u, int(bar)]
-
-        st = self.game.stats
-        countdown = 0.0
-        if self.resume_at is not None:
-            countdown = self.resume_at - now
-        elif self.player.playing and t < 0 and not self.game.stats.hits:
-            countdown = -t / 1000
-        menu = self.menus[-1].view() if self.menus and not self.calib else {}
-        calib = {}
-        if self.calib:
-            calib = {"taps": len(self.calib_strums), "total": calibration.CLICKS,
-                     "progress": min(1.0, self.calib.position_ms() / calibration.click_times_ms()[-1])}
-        return {
-            "notes": notes, "beats": beats, "held": self.held,
-            "flash": [max(0.0, 1 - (now - ft) / 0.18) for ft in self.flash_t],
-            "missFlash": max(0.0, 1 - (now - self.miss_t) / 0.25),
-            "score": st.score, "streak": st.streak, "mult": st.multiplier, "accuracy": st.accuracy,
-            "title": f"{self.chart.artist} – {self.chart.title}", "difficulty": DIFF_NAMES[self.difficulty],
-            "progress": max(0.0, min(1.0, t / max(1, self.chart.duration_ms))),
-            "countdown": countdown, "menu": menu, "menuHint": MENU_HINT if menu else "", "calib": calib,
-            "toast": self.toast_text if now < self.toast_until else "",
-            "message": self.message, "opacity": self.cfg.opacity, "hwWidth": self.cfg.highway_width,
-        }
+        return notes, beats
 
     def play_itself(self, t: float) -> None:
         """Demo (--autoplay): toca cada nota a su tiempo y mantiene los trastes hasta la siguiente."""

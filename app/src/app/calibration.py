@@ -1,8 +1,10 @@
-"""Calibración del retardo de audio: suenan clics a ritmo fijo y se rasguea con ellos.
+"""Calibración del retardo, como en Band Hero: bajan notas por la autopista, cada una suena (un clic) al
+llegar a la línea y se rasguea en ese momento.
 
-Si lo que oyes llega L ms tarde de lo que cree el reproductor (altavoz Bluetooth, driver), rasgueas L ms
-tarde de cada clic según su reloj: la mediana de (strum - clic) es lo que hay que sumar a audio_offset_ms.
-La pantalla no enseña nada al ritmo para que se siga al oído y no a la vista.
+Si lo que oyes y ves llega L ms tarde de lo que cree el reproductor (altavoz Bluetooth, driver, monitor),
+rasgueas L ms tarde de cada clic según su reloj: la mediana de (strum - clic) es lo que hay que sumar a
+audio_offset_ms (que mueve a la vez el sonido, la imagen y los aciertos). Los 4 clics de entrada, más
+agudos y sin nota, solo marcan el ritmo.
 """
 
 from __future__ import annotations
@@ -22,6 +24,18 @@ def click_times_ms() -> list[float]:
     return [LEAD_MS + i * period for i in range(COUNT_IN + CLICKS)]
 
 
+def scored_clicks_ms() -> list[float]:
+    """Los clics con nota, los que se miden."""
+    return click_times_ms()[COUNT_IN:]
+
+
+def nearest(strum_ms: float) -> int | None:
+    """Índice (en scored_clicks_ms) del clic que toca ese strum, o None si no está cerca de ninguno."""
+    clicks = np.array(scored_clicks_ms())
+    i = int(np.argmin(np.abs(clicks - strum_ms)))
+    return i if abs(strum_ms - clicks[i]) <= MAX_DEV_MS else None
+
+
 def click_track(sr: int) -> np.ndarray:
     """Audio estéreo float32 con los clics de click_times_ms()."""
     times = click_times_ms()
@@ -38,7 +52,7 @@ def click_track(sr: int) -> np.ndarray:
 
 def measure(strums_ms: list[float], clicks_ms: list[float] | None = None) -> tuple[float, int, float] | None:
     """(desfase mediano en ms, strums que cuentan, dispersión en ms) o None si hay pocos."""
-    clicks = np.array((clicks_ms or click_times_ms())[COUNT_IN:])
+    clicks = np.array(clicks_ms or scored_clicks_ms())
     devs = []
     for s in strums_ms:
         d = s - clicks[np.argmin(np.abs(clicks - s))]

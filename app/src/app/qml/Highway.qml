@@ -1,8 +1,9 @@
 // Autopista en perspectiva. Python (play.Bridge.tick) da en cada fotograma un mapa `f` con:
 //   notes: [carril, u, uFin, estado, hopo, sosteniendo, notasDelAcorde] x N  (u: 0 = línea de golpeo,
 //          1 = horizonte; estado 0 pendiente, 1 acertada, 2 fallada)
-//   beats: [u, inicioDeCompás] x N, held: 5 bool, flash: 5 (0..1), el marcador, menu (title, body,
-//   items, values, sel, editing; vacío si no hay), calib, toast y message.
+//   beats: [u, inicioDeCompás] x N, held / burn (sustain sonando): 5 bool, flash / missLane: 5 (0..1),
+//   time (s, para el parpadeo de las llamas), el marcador, menu (title, body, items, values, sel, editing;
+//   vacío si no hay), calib, toast y message.
 import QtQuick
 import QtQuick.Shapes
 
@@ -11,7 +12,8 @@ Item {
     property var f: ({ notes: [], beats: [], held: [false, false, false, false, false], flash: [0, 0, 0, 0, 0],
                        score: 0, streak: 0, mult: 1, accuracy: 1, title: "", difficulty: "", message: "",
                        progress: 0, countdown: 0, menu: ({}), menuHint: "", calib: ({}), toast: "",
-                       opacity: 0.85, missFlash: 0, hwWidth: 560 })
+                       opacity: 0.85, missFlash: 0, missLane: [0, 0, 0, 0, 0], burn: [false, false, false, false, false],
+                       time: 0, autoplay: false, hwWidth: 560 })
     readonly property var colors: ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
     readonly property var multColors: ["white", "#ffdc00", "#2ecc40", "#c86cff"]
     readonly property real farScale: 0.38
@@ -23,6 +25,7 @@ Item {
     readonly property int notePool: 200
     readonly property int beatPool: 32
     readonly property int stride: 7
+    readonly property real glowU: 0.15  // hasta dónde sube la luz del carril pulsado (un tercio de la autopista)
     readonly property bool menuOpen: f.menu !== undefined && f.menu.title !== undefined
     readonly property bool calibrating: f.calib !== undefined && f.calib.total !== undefined
 
@@ -63,15 +66,32 @@ Item {
             ShapePath {
                 strokeWidth: 0; strokeColor: "transparent"
                 fillGradient: LinearGradient {
-                    y1: root.yAt(0.45); y2: root.strikeY
+                    y1: root.yAt(root.glowU); y2: root.strikeY
                     GradientStop { position: 0; color: "transparent" }
                     GradientStop { position: 1; color: Qt.alpha(root.colors[index], 0.28) }
                 }
-                startX: root.xAt(index - 0.5, 0.45); startY: root.yAt(0.45)
-                PathLine { x: root.xAt(index + 0.5, 0.45); y: root.yAt(0.45) }
+                startX: root.xAt(index - 0.5, root.glowU); startY: root.yAt(root.glowU)
+                PathLine { x: root.xAt(index + 0.5, root.glowU); y: root.yAt(root.glowU) }
                 PathLine { x: root.xAt(index + 0.5, 0); y: root.strikeY }
                 PathLine { x: root.xAt(index - 0.5, 0); y: root.strikeY }
             }
+        }
+    }
+    Shape {  // al fallar: la parte de abajo de la autopista se enciende en rojo y se apaga
+        anchors.fill: parent
+        visible: root.f.missFlash > 0.01
+        opacity: root.f.missFlash
+        ShapePath {
+            strokeWidth: 0; strokeColor: "transparent"
+            fillGradient: LinearGradient {
+                y1: root.yAt(0.18); y2: root.yAt(-0.25)
+                GradientStop { position: 0; color: "transparent" }
+                GradientStop { position: 1; color: "#90ff1e1e" }
+            }
+            startX: root.xAt(-0.5, 0.18); startY: root.yAt(0.18)
+            PathLine { x: root.xAt(4.5, 0.18); y: root.yAt(0.18) }
+            PathLine { x: root.xAt(4.5, -0.25); y: root.yAt(-0.25) }
+            PathLine { x: root.xAt(-0.5, -0.25); y: root.yAt(-0.25) }
         }
     }
     Repeater {  // separaciones entre carriles y bordes
@@ -104,7 +124,7 @@ Item {
     // ---------- línea de golpeo ----------
     Rectangle {
         x: root.xAt(-0.5, 0); width: root.xAt(4.5, 0) - x; y: root.strikeY - 2; height: 4
-        color: "#bbffffff"
+        color: Qt.tint("#bbffffff", Qt.rgba(1, 0.12, 0.12, root.f.missFlash * 0.85))
     }
     Repeater {
         model: 5
@@ -113,21 +133,13 @@ Item {
             readonly property real w: root.laneW * 0.84
             readonly property color col: root.colors[index]
             readonly property bool down: root.f.held[index]
-            x: root.xAt(index, 0) - w / 2; y: root.strikeY - w * 0.3; width: w; height: w * 0.6
+            readonly property real miss: root.f.missLane[index]
+            x: root.xAt(index, 0) - w / 2 + Math.sin(root.f.time * 70) * miss * root.laneW * 0.05
+            y: root.strikeY - w * 0.3; width: w; height: w * 0.6
             Rectangle {  // destello al acertar
                 anchors.centerIn: parent; width: parent.width * 1.7; height: parent.height * 2.2; radius: height / 2
                 color: parent.col; opacity: root.f.flash[index] * 0.6
                 scale: 1 + (1 - root.f.flash[index]) * 0.4
-            }
-            Rectangle {  // llama hacia arriba al acertar
-                anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.verticalCenter
-                width: parent.width * 0.5; height: parent.height * 3.2 * root.f.flash[index]; radius: width / 2
-                opacity: root.f.flash[index]
-                gradient: Gradient {
-                    GradientStop { position: 0; color: "transparent" }
-                    GradientStop { position: 0.6; color: Qt.lighter(strikeBtn.col, 1.4) }
-                    GradientStop { position: 1; color: "white" }
-                }
             }
             Rectangle {
                 anchors.fill: parent; radius: height / 2
@@ -137,6 +149,11 @@ Item {
             Rectangle {
                 anchors.centerIn: parent; width: parent.width * 0.5; height: parent.height * 0.5; radius: height / 2
                 color: parent.down ? "white" : Qt.alpha(parent.col, 0.35)
+            }
+            Rectangle {  // fallo
+                anchors.fill: parent; radius: height / 2; visible: parent.miss > 0.01
+                color: Qt.rgba(0.9, 0.05, 0.05, parent.miss * 0.55); border.color: Qt.rgba(1, 0.3, 0.3, parent.miss)
+                border.width: 4
             }
         }
     }
@@ -190,34 +207,95 @@ Item {
                 readonly property real w: root.laneW * (gem.hopo ? 0.7 : 0.84) * sc
                 x: root.xAt(gem.lane, gem.u) - w / 2; y: root.yAt(gem.u) - w * 0.32
                 width: w; height: w * (gem.hopo ? 0.5 : 0.58)
+                readonly property bool tap: gem.hopo && gem.state !== 2
+                Rectangle {  // halo de los HOPO: se tocan sin strum
+                    visible: parent.tap
+                    anchors.centerIn: parent; width: parent.width * 1.3; height: parent.height * 1.6; radius: height / 2
+                    color: Qt.alpha(Qt.lighter(gem.col, 1.6), 0.4)
+                }
                 Rectangle {  // canto
                     anchors.fill: parent; anchors.topMargin: parent.height * 0.18; radius: height / 2
                     color: Qt.darker(gem.col, 2.2); border.color: "#cc000000"; border.width: Math.max(1, 2 * parent.sc)
                 }
-                Rectangle {  // cara
+                Rectangle {  // cara (HOPO: blanca con aro grueso del color del carril)
+                    id: face
+                    readonly property bool tap: parent.tap
                     width: parent.width; height: parent.height * 0.84; radius: height / 2
-                    border.color: gem.hopo ? "white" : Qt.darker(gem.col, 1.5)
-                    border.width: Math.max(1, (gem.hopo ? 5 : 2) * parent.sc)
+                    border.color: tap ? gem.col : Qt.darker(gem.col, 1.5)
+                    border.width: tap ? Math.max(2, height * 0.2) : Math.max(1, 2 * parent.sc)
                     gradient: Gradient {
-                        GradientStop { position: 0; color: Qt.lighter(gem.col, 1.35) }
-                        GradientStop { position: 1; color: gem.col }
+                        GradientStop { position: 0; color: face.tap ? "white" : Qt.lighter(gem.col, 1.35) }
+                        GradientStop { position: 1; color: face.tap ? Qt.tint(gem.col, "#b0ffffff") : gem.col }
                     }
                 }
                 Rectangle {  // centro
                     x: parent.width * 0.3; width: parent.width * 0.4
                     y: parent.height * 0.22; height: parent.height * 0.4; radius: height / 2
-                    color: gem.hopo ? "white" : "#bbffffff"
-                    border.color: Qt.darker(gem.col, 1.3); border.width: gem.hopo ? 0 : Math.max(1, parent.sc)
+                    visible: !parent.tap
+                    color: "#bbffffff"
+                    border.color: Qt.darker(gem.col, 1.3); border.width: Math.max(1, parent.sc)
+                }
+            }
+        }
+    }
+
+    // ---------- llamas ----------
+    Repeater {  // al acertar, y mientras suena un sustain: tres lenguas de fuego del color del carril
+        model: 5
+        Item {
+            id: flame
+            anchors.fill: parent
+            readonly property real level: Math.max(root.f.flash[index],
+                                                   root.f.burn[index] ? 0.55 + 0.08 * Math.sin(root.f.time * 23 + index) : 0)
+            readonly property color col: root.colors[index]
+            readonly property real cx: root.xAt(index, 0)
+            readonly property real base: root.strikeY + root.laneW * 0.08
+            readonly property real fw: root.laneW * 0.66
+            readonly property int lane: index
+            visible: level > 0.02
+            opacity: Math.min(1, level * 1.5)
+            Repeater {
+                model: 3  // izquierda, centro (la más alta), derecha
+                Shape {
+                    id: tongue
+                    anchors.fill: parent
+                    readonly property real side: index - 1
+                    readonly property real flick: 1 + 0.2 * Math.sin(root.f.time * (17 + 6 * index) + index * 2.1 + flame.lane)
+                    readonly property real h: root.laneW * (index === 1 ? 1.9 : 1.1) * flame.level * flick
+                    readonly property real bw: flame.fw * (index === 1 ? 0.6 : 0.42)
+                    readonly property real x0: flame.cx + side * flame.fw * 0.26
+                    readonly property real sway: root.laneW * 0.07 * Math.sin(root.f.time * 9 + index * 1.7 + flame.lane)
+                    ShapePath {
+                        strokeWidth: 0; strokeColor: "transparent"
+                        fillGradient: LinearGradient {
+                            x1: tongue.x0; y1: flame.base; x2: tongue.x0; y2: flame.base - tongue.h
+                            GradientStop { position: 0; color: "white" }
+                            GradientStop { position: 0.28; color: Qt.lighter(flame.col, 1.5) }
+                            GradientStop { position: 0.65; color: Qt.alpha(flame.col, 0.85) }
+                            GradientStop { position: 1; color: Qt.alpha(flame.col, 0) }
+                        }
+                        startX: tongue.x0 - tongue.bw / 2; startY: flame.base
+                        PathCubic {
+                            x: tongue.x0 + tongue.sway; y: flame.base - tongue.h
+                            control1X: tongue.x0 - tongue.bw / 2; control1Y: flame.base - tongue.h * 0.45
+                            control2X: tongue.x0 + tongue.sway - tongue.bw * 0.1; control2Y: flame.base - tongue.h * 0.75
+                        }
+                        PathCubic {
+                            x: tongue.x0 + tongue.bw / 2; y: flame.base
+                            control1X: tongue.x0 + tongue.sway + tongue.bw * 0.1; control1Y: flame.base - tongue.h * 0.75
+                            control2X: tongue.x0 + tongue.bw / 2; control2Y: flame.base - tongue.h * 0.45
+                        }
+                        PathQuad {
+                            x: tongue.x0 - tongue.bw / 2; y: flame.base
+                            controlX: tongue.x0; controlY: flame.base + tongue.bw * 0.35
+                        }
+                    }
                 }
             }
         }
     }
 
     // ---------- marcador ----------
-    Rectangle {  // borde rojo al fallar
-        anchors.fill: parent; color: "transparent"
-        border.color: "#ff3030"; border.width: 6; opacity: root.f.missFlash * 0.5
-    }
     Rectangle {
         x: root.xAt(4.5, 0) + 18; y: root.strikeY - height + 30
         width: score.implicitWidth + 32; height: score.implicitHeight + 24; radius: 10
@@ -245,7 +323,8 @@ Item {
                 }
             }
             Text { text: root.f.streak > 0 ? root.f.streak + " seguidas" : " "; color: "white"; font.pixelSize: 18 }
-            Text { text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty; color: "#ccffffff"
+            Text { text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty + (root.f.autoplay ? " · demo" : "")
+                   color: "#ccffffff"
                    font.pixelSize: 16 }
         }
     }
@@ -278,7 +357,7 @@ Item {
 
     // ---------- menú ----------
     Rectangle {
-        anchors.fill: parent; color: "#70000000"; visible: root.menuOpen || root.calibrating
+        anchors.fill: parent; color: "#70000000"; visible: root.menuOpen
     }
     Rectangle {
         id: menuBox
@@ -317,9 +396,9 @@ Item {
                    color: "#99ffffff"; font.pixelSize: 14 }
         }
     }
-    Rectangle {  // calibración: sin nada que se mueva al ritmo, para que se siga al oído
+    Rectangle {  // calibración: arriba, para ver bajar las notas
         visible: root.calibrating
-        anchors.centerIn: parent
+        anchors.horizontalCenter: parent.horizontalCenter; y: root.height * 0.1
         width: Math.min(root.width - 40, 560); height: calCol.implicitHeight + 48; radius: 14
         color: "#f0101024"; border.color: "#70ffffff"; border.width: 1.5
         Column {
@@ -327,15 +406,16 @@ Item {
             x: 28; y: 24; width: parent.width - 56; spacing: 12
             Text { text: "Calibrar el retardo"; color: "white"; font.pixelSize: 30; font.bold: true }
             Text { width: parent.width; color: "#ddffffff"; font.pixelSize: 17; wrapMode: Text.WordWrap
-                   text: "Escucha los 4 clics agudos de entrada y rasguea con cada clic grave (son "
-                         + (root.calibrating ? root.f.calib.total : 16) + "). No hace falta pulsar trastes.<br>"
-                         + "Rojo / −: cancelar"; textFormat: Text.StyledText }
+                   text: "Rasguea justo cuando cada nota amarilla llegue a la línea: suena un clic al pasar. "
+                         + "Los 4 clics agudos del principio solo marcan el ritmo. No hace falta pulsar trastes.<br>"
+                   + "Rojo / −: cancelar"; textFormat: Text.StyledText }
             Rectangle {
                 width: parent.width; height: 6; radius: 3; color: "#44ffffff"
                 Rectangle { width: parent.width * (root.calibrating ? root.f.calib.progress : 0); height: 6; radius: 3
                             color: "#2ecc40" }
             }
-            Text { text: "Rasgueos: " + (root.calibrating ? root.f.calib.taps : 0); color: "white"; font.pixelSize: 20 }
+            Text { text: "Notas: " + (root.calibrating ? root.f.calib.taps + " / " + root.f.calib.total : ""); color: "white"
+                   font.pixelSize: 20 }
         }
     }
     Text {

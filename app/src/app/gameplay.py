@@ -132,6 +132,10 @@ class Game:
             self.next += 1
 
     @property
+    def sustaining_frets(self) -> set[int]:
+        return {f for ns in self._sustains if ns.sustaining for f in ns.note.frets}
+
+    @property
     def finished(self) -> bool:
         return self.next >= len(self.notes) and not self._sustains
 
