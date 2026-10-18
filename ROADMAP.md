@@ -136,7 +136,7 @@ Primero con audio reproducido por la propia app: así la sincronía es exacta y 
 - [x] Pantalla de calibración de retardo, guardada en la config: como en Band Hero, bajan notas que suenan (un clic) al pasar por la línea y se rasguea con ellas; la mediana del desfase va a `audio_offset_ms` (mueve sonido, imagen y aciertos a la vez). El desfase entre imagen y sonido, a mano en Ajustes.
 - [x] Selector de dificultad rápido desde el propio overlay.
 - [x] Opacidad, tamaño y posición del overlay configurables.
-- [x] Menú con la guitarra: + abre la pausa (continuar, dificultad, reiniciar, ajustes, calibrar, salir), − cambia de dificultad sin parar la canción; strum mueve, verde elige, rojo vuelve. Lo mismo con teclado (Espacio, Tab, flechas, Intro, Esc; Esc antes era Retroceso, cambiado el 18-10-2026).
+- [x] Menú con la guitarra: + abre la pausa (continuar, dificultad, reiniciar, ajustes, calibrar, salir), − cambia de dificultad sin parar la canción; strum mueve, verde elige, rojo vuelve. Lo mismo con teclado (Espacio, Tab, flechas, Intro, Esc vuelve y jugando abre la pausa, Retroceso reinicia la canción; desde el 18-10-2026, antes Retroceso hacía las dos cosas).
 - [x] La guitarra se reconecta sola si se apaga o se enciende con el juego abierto.
 - [x] Récords y estadísticas por canción y dificultad (`%APPDATA%/MusicHero/stats.json`, por hash del audio): mejor puntuación con su precisión, racha y fecha, partidas jugadas, mejor precisión, mejor racha y las últimas 20 partidas. Se ven en la pausa, en el marcador (dorado al superarlo, con aviso) y al acabar. No cuentan las partidas con el modo automático ni las empezadas a mitad (cambio de dificultad jugando).
 - [x] Dificultad guardada por canción; si una canción no tiene, la de por defecto (Ajustes).

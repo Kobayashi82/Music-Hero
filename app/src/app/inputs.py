@@ -7,7 +7,7 @@ Teclado, con el juego activo (las teclas no llegan a la app que tenga el foco). 
 (ACTIONS); se cambian en Ajustes → Teclas y se guardan en config.keys:
     A S D F G          trastes verde, rojo, amarillo, azul, naranja
     flechas arriba/abajo, Intro   strum (en los menús: mover; Intro elige)
-    Espacio            menú (pausa)   Esc   reiniciar la canción (en los menús: volver)
+    Espacio            menú (pausa)   Esc   volver (jugando: la pausa)   Retroceso   reiniciar la canción
     Tab                cambiar de dificultad sin parar la canción
     E                  activar el star power
 En el buscador, letras, números y Espacio escriben y Retroceso borra (los trastes siguen en la guitarra).
@@ -44,7 +44,8 @@ ACTIONS = [
     ("strum_up", "Strum arriba", "up", ("strum", -1)),
     ("strum_down", "Strum abajo", "down", ("strum", 1)),
     ("pause", "Menú (pausa)", "space", ("control", "pause")),
-    ("restart", "Reiniciar / volver", "esc", ("control", "restart")),
+    ("back", "Volver / pausa", "esc", ("control", "back")),
+    ("restart", "Reiniciar la canción", "backspace", ("control", "restart")),
     ("difficulty", "Cambiar de dificultad", "tab", ("control", "difficulty")),
     ("star", "Star power", "e", ("control", "star")),
     ("enter", "Elegir", "enter", ("control", "enter")),

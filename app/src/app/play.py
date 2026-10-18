@@ -799,7 +799,7 @@ class Session(QObject):
             if i is not None and i not in self.calib_hits:
                 self.calib_hits.add(i)
                 self.flash_t[CALIB_LANE] = ev.t
-        elif (ev.kind == "control" and ev.value in ("select", "restart", "start", "pause")) or (
+        elif (ev.kind == "control" and ev.value in ("select", "back", "start", "pause")) or (
                 ev.kind == "fret" and ev.down and ev.value == 1):
             self.stop_calibration()
 
@@ -823,7 +823,7 @@ class Session(QObject):
         elif ev.kind == "control":
             if ev.value in ("start", "enter"):
                 menu.select()
-            elif ev.value in ("select", "restart"):
+            elif ev.value in ("select", "back"):
                 self.menu_back()
             elif ev.value == "pause" and self.menus[0].on_back:
                 self.menus[0].on_back()
@@ -832,7 +832,7 @@ class Session(QObject):
 
     def game_input(self, ev) -> None:
         if ev.kind == "control":
-            if ev.value in ("start", "pause"):
+            if ev.value in ("start", "pause", "back"):
                 self.pause()
             elif ev.value in ("select", "difficulty"):
                 self.cycle_difficulty()
