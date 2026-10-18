@@ -18,14 +18,13 @@ Item {
     readonly property var multColors: ["white", "#ffdc00", "#2ecc40", "#c86cff"]
     readonly property real farScale: 0.38
     readonly property real k: 1 / farScale - 1
-    property real hwNear: Math.min(width - 460, f.hwWidth)
+    property real hwNear: Math.min(width - 640, f.hwWidth)  // play.SIDE_MARGIN: sitio para el marcador
     readonly property real laneW: hwNear / 5
     readonly property real strikeY: height - Math.max(110, height * 0.1)
     readonly property real horizonY: height * 0.06
     readonly property int notePool: 200
     readonly property int beatPool: 32
     readonly property int stride: 7
-    readonly property real glowU: 0.15  // hasta dónde sube la luz del carril pulsado (un tercio de la autopista)
     // sprites (app/sprites.py, lienzo 256 x 160 con la cara de 180 x 82 centrada en y = 75): proporción del
     // lienzo, cuánto más ancho es que la cara (el resto es halo) y dónde cae el centro de la cara
     readonly property real gemAspect: 160 / 256
@@ -62,18 +61,6 @@ Item {
             PathLine { x: root.xAt(4.5, -0.25); y: root.yAt(-0.25) }
             PathLine { x: root.xAt(-0.5, -0.25); y: root.yAt(-0.25) }
             PathLine { x: root.xAt(-0.5, 1); y: root.horizonY }
-        }
-    }
-    Repeater {  // luz del carril pulsado: un haz suave (sprite beam/, más estrecho arriba como el carril)
-        model: 5
-        Image {
-            readonly property real beamTop: root.yAt(root.glowU)
-            source: root.sprite("beam/" + index); smooth: true
-            opacity: root.f.held[index] ? 1 : 0
-            visible: opacity > 0
-            Behavior on opacity { NumberAnimation { duration: 70 } }
-            width: root.laneW * 1.15; height: root.strikeY - beamTop
-            x: root.xAt(index, 0) - width / 2; y: beamTop
         }
     }
     Shape {  // al fallar: la parte de abajo de la autopista se enciende en rojo y se apaga
@@ -204,7 +191,7 @@ Item {
             readonly property color col: state === 2 ? "#6a6a6a" : root.colors[lane]
             visible: used
 
-            Shape {  // cola del sustain: halo, banda de color y núcleo (blanco mientras se mantiene)
+            Shape {  // cola del sustain: banda de color (más viva cerca de la línea) y filo central, blanco al mantener
                 preferredRendererType: Shape.CurveRenderer
                 id: tail
                 anchors.fill: parent
@@ -216,15 +203,11 @@ Item {
                 readonly property real live: gem.state === 2 ? 0.45 : 1
                 ShapePath {
                     strokeWidth: 0; strokeColor: "transparent"
-                    fillColor: Qt.rgba(gem.col.r, gem.col.g, gem.col.b, (gem.sustaining ? 0.3 : 0.16) * tail.live)
-                    startX: root.xAt(gem.lane, tail.u0) - tail.w0; startY: root.yAt(tail.u0)
-                    PathLine { x: root.xAt(gem.lane, tail.u0) + tail.w0; y: root.yAt(tail.u0) }
-                    PathLine { x: root.xAt(gem.lane, gem.uEnd) + tail.w1; y: root.yAt(gem.uEnd) }
-                    PathLine { x: root.xAt(gem.lane, gem.uEnd) - tail.w1; y: root.yAt(gem.uEnd) }
-                }
-                ShapePath {
-                    strokeWidth: 0; strokeColor: "transparent"
-                    fillColor: Qt.rgba(gem.col.r, gem.col.g, gem.col.b, 0.85 * tail.live)
+                    fillGradient: LinearGradient {
+                        y1: root.yAt(gem.uEnd); y2: root.yAt(tail.u0)
+                        GradientStop { position: 0; color: Qt.rgba(gem.col.r, gem.col.g, gem.col.b, 0.55 * tail.live) }
+                        GradientStop { position: 1; color: Qt.rgba(gem.col.r, gem.col.g, gem.col.b, (gem.sustaining ? 1 : 0.9) * tail.live) }
+                    }
                     startX: root.xAt(gem.lane, tail.u0) - tail.w0 / 2; startY: root.yAt(tail.u0)
                     PathLine { x: root.xAt(gem.lane, tail.u0) + tail.w0 / 2; y: root.yAt(tail.u0) }
                     PathLine { x: root.xAt(gem.lane, gem.uEnd) + tail.w1 / 2; y: root.yAt(gem.uEnd) }
@@ -305,9 +288,8 @@ Item {
                 }
             }
             Text { text: root.f.streak > 0 ? root.f.streak + " seguidas" : " "; color: "white"; font.pixelSize: 18 }
-            Text { text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty + (root.f.autoplay ? " · automático" : "")
-                   color: "#ccffffff"
-                   font.pixelSize: 16 }
+            Text { text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty; color: "#ccffffff"; font.pixelSize: 16 }
+            Text { visible: root.f.autoplay; text: "Automático"; color: "#ffdc00"; font.pixelSize: 16; font.bold: true }
         }
     }
     Rectangle {  // título y progreso

@@ -38,6 +38,7 @@ LEAD_IN_MS = 2500.0
 RESUME_MS = 1500.0  # cuenta atrás al quitar la pausa
 SWITCH_AHEAD_MS = 400.0  # al cambiar de dificultad jugando, las notas más cercanas no cuentan
 TOAST_S = 2.5
+SIDE_MARGIN = 640  # la ventana es la autopista más esto (la mitad a cada lado): sitio para el marcador
 CALIB_LANE = 2  # las notas de la calibración bajan por el carril amarillo (el del centro)
 MENU_HINT = "Strum: mover · Verde / +: elegir · Rojo / −: volver"
 POSITIONS = {"left": "Izquierda", "center": "Centro", "right": "Derecha"}
@@ -470,7 +471,7 @@ class Bridge(QObject):
 
 def place_view(view: QQuickView, cfg: Config) -> None:
     geo = QGuiApplication.primaryScreen().availableGeometry()
-    w = min(geo.width(), cfg.highway_width + 460)  # sitio para el marcador a la derecha
+    w = min(geo.width(), cfg.highway_width + SIDE_MARGIN)
     x = {"left": geo.x(), "right": geo.x() + geo.width() - w}.get(cfg.position, geo.x() + (geo.width() - w) // 2)
     view.setGeometry(x, geo.y(), w, geo.height())
 

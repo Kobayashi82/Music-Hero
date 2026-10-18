@@ -1,13 +1,12 @@
 """Sprites del overlay: entre Rock Band y neón. Materiales creíbles (bisel metálico, tapa de color como cristal
-con luz por dentro, brillo amplio y suave, sombra de contacto) y algo de luz emitida. Se dibujan con QPainter
+con luz por dentro, brillo amplio y suave, sin sombras) y algo de luz emitida. Se dibujan con QPainter
 una vez, al doble de resolución (más nítidos al reducir), y QML solo los escala (image://sprites/<id>).
 
 Ids:
-    gem/<carril>/<normal|hopo|miss>    nota (GEM_W x GEM_H, con sitio para halo y sombra; la cara es FACE)
+    gem/<carril>/<normal|hopo|miss>    nota (GEM_W x GEM_H, con sitio para el halo; la cara es FACE)
     fret/<carril>/<up|down>            botón de la línea de golpeo (mismo lienzo y cara que las notas)
     flame/<carril>/<0..FLAME_FRAMES-1> acierto: fuego suave, haz de luz y chispas (base abajo en el centro)
     glow/<carril|white>                halo suave redondo (GLOW x GLOW)
-    beam/<carril>                      luz del carril pulsado (BEAM_W x BEAM_H, la base abajo)
 """
 
 from __future__ import annotations
@@ -25,8 +24,6 @@ FACE = QRectF(38, 34, 180, 82)  # elipse de la cara dentro del lienzo (Highway.q
 DEPTH = 16  # grosor de la pieza
 FLAME_W, FLAME_H, FLAME_BASE, FLAME_FRAMES = 160, 320, 34, 6
 GLOW = 256
-BEAM_W, BEAM_H = 128, 256
-BEAM_TOP_WIDTH = 0.8  # arriba el haz es así de ancho respecto a abajo (la perspectiva de la autopista)
 SS = 2  # superresolución
 
 
@@ -126,14 +123,6 @@ def _side(p: QPainter, face: QRectF, depth: float, light: QColor, dark: QColor) 
     p.setPen(QPen(QColor(0, 0, 0, 200), 1.5))
     p.setBrush(QBrush(g))
     p.drawPath(_body(face, depth))
-
-
-def _contact_shadow(p: QPainter, face: QRectF, depth: float) -> None:
-    def paint(q: QPainter) -> None:
-        q.setPen(Qt.PenStyle.NoPen)
-        q.setBrush(QColor(0, 0, 0, 200))
-        q.drawEllipse(face.adjusted(6, depth + 4, -6, depth + 2))
-    _paste(p, _soft(GEM_W, GEM_H, paint, 6), 0.85)
 
 
 def _halo(p: QPainter, shape: QPainterPath, col: QColor, strength: float) -> None:
@@ -239,7 +228,6 @@ def draw_fret(lane: int, down: bool) -> QImage:
     img, p = _img(GEM_W, GEM_H)
     press = 6 if down else 0
     face = FACE.translated(0, press)
-    _contact_shadow(p, FACE, DEPTH)
     lens = face.adjusted(16, 9, -16, -9)
     if down:
         _halo(p, _ellipse(lens.adjusted(-10, -6, 10, 6)), col, 1.4)
@@ -352,26 +340,6 @@ def draw_glow(name: str) -> QImage:
     return img
 
 
-def draw_beam(lane: int) -> QImage:
-    """Haz de luz del carril pulsado, calculado píxel a píxel: caída gaussiana a los lados y hacia arriba,
-    núcleo casi blanco, y más estrecho arriba como el carril en perspectiva."""
-    col = QColor(COLORS[lane])
-    x = np.linspace(-1, 1, BEAM_W)[None, :]
-    t = np.linspace(0, 1, BEAM_H)[:, None]  # 0 arriba, 1 abajo (la línea de golpeo)
-    wf = BEAM_TOP_WIDTH + (1 - BEAM_TOP_WIDTH) * t
-    core = np.exp(-(x / (0.14 * wf)) ** 2)
-    wide = np.exp(-(x / (0.4 * wf)) ** 2)
-    vert = t ** 1.7
-    base = np.exp(-((1 - t) / 0.06) ** 2)  # se aviva justo encima del botón
-    a = np.clip((0.42 * wide + 0.5 * core) * vert + 0.35 * base * wide, 0, 1)
-    white = np.clip(core * vert * 0.75, 0, 1)
-    rgb = np.array([col.redF(), col.greenF(), col.blueF()])[None, None, :]
-    rgb = rgb * (1 - white[..., None]) + white[..., None]
-    arr = np.dstack([rgb * a[..., None], a]) * 255  # premultiplicado
-    arr = np.ascontiguousarray(arr.astype(np.uint8))
-    return QImage(arr.data, BEAM_W, BEAM_H, BEAM_W * 4, QImage.Format.Format_RGBA8888_Premultiplied).copy()
-
-
 def draw(sprite_id: str) -> QImage:
     parts = sprite_id.split("/")
     kind = parts[0]
@@ -383,8 +351,6 @@ def draw(sprite_id: str) -> QImage:
         return draw_flame(int(parts[1]), int(parts[2]) % FLAME_FRAMES)
     if kind == "glow":
         return draw_glow(parts[1])
-    if kind == "beam":
-        return draw_beam(int(parts[1]))
     raise KeyError(sprite_id)
 
 

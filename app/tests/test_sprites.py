@@ -11,7 +11,7 @@ def test_todos_los_sprites_se_dibujan():
     ids = [f"gem/{lane}/{k}" for lane in range(5) for k in ("normal", "hopo", "miss")]
     ids += [f"fret/{lane}/{k}" for lane in range(5) for k in ("up", "down")]
     ids += [f"flame/{lane}/{f}" for lane in range(5) for f in range(sprites.FLAME_FRAMES)]
-    ids += [f"glow/{g}" for g in ("0", "4", "white")] + [f"beam/{lane}" for lane in range(5)]
+    ids += [f"glow/{g}" for g in ("0", "4", "white")]
     for sid in ids:
         img = sprites.draw(sid)
         center = img.pixelColor(img.width() // 2, int(img.height() * 0.45))
