@@ -1,7 +1,8 @@
 """Acelerómetro del Wiimote metido en la guitarra: para saber qué eje sigue al mástil (star power al levantarla).
 
 Enseña la gravedad en cada eje (en g) y, al acabar, cuánto ha cambiado cada uno entre la postura normal y la
-guitarra levantada. Uso (con el juego cerrado, que usa el mismo mando):
+guitarra levantada; y avisa cuando el juego la daría por levantada (starpower.Tilt). Uso (con el juego cerrado,
+que usa el mismo mando):
     uv run --project app python tools/poc_wii_tilt.py [segundos]
 """
 import sys
@@ -9,6 +10,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app" / "src"))
+from app.starpower import Tilt  # noqa: E402
 from app.wii_guitar import WiiGuitar  # noqa: E402
 
 
@@ -18,12 +20,14 @@ def main() -> int:
     g = WiiGuitar.open(accel=True)
     print(f"calibración {g.calib}; guitarra: {g.is_guitar}")
     print("Sostén la guitarra como para tocar. Cuando lo pida, levanta el mástil (como en Guitar Hero) y bájalo.")
-    t0, last, rows = time.time(), 0.0, []
+    t0, last, rows, tilt = time.time(), 0.0, [], Tilt()
     while time.time() - t0 < seconds:
         s = g.poll(20)
         if s is None:
             continue
         rows.append((time.time() - t0, s.accel))
+        if tilt.feed(s.accel):
+            print(f"{time.time() - t0:5.1f} s  >>> el juego la da por levantada: star power")
         if time.time() - last > 0.25:
             last = time.time()
             el = time.time() - t0
