@@ -58,7 +58,7 @@ Once installed:
 | --- | --- | --- |
 | `A` `S` `D` `F` `G` | Frets | Green, red, yellow, blue, orange |
 | `↑` `↓` | Strum bar | Strum (in menus: move) |
-| `Space` | `+` | Menu / pause |
+| `Space` · right-click on the highway | `+` | Menu / pause |
 | `Tab` | `−` | Change difficulty without stopping |
 | `E` | Tilt the guitar up | Star power |
 | `Backspace` | | Restart the song |

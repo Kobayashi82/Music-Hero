@@ -132,6 +132,7 @@ class Session(QObject):
         self.capturing: str | None = None  # acción esperando su tecla nueva (Ajustes → Teclas)
         self.mouse_on = False  # la ventana recibe el ratón (hay un menú abierto)
         self.tray: QSystemTrayIcon | None = None  # icono junto al reloj (main)
+        self.right_click: win32.RightClick | None = None  # clic derecho en la autopista: el menú (main)
         self.hidden_hint = False  # ya se avisó de que oculto sigue en el icono
         self.strum_hold: tuple[int, float, float] | None = None  # strum mantenido en un menú: (dirección, desde, siguiente)
         self.message = "; ".join(inputs.errors)
@@ -234,6 +235,8 @@ class Session(QObject):
                 self.pause()
             self.inputs.set_game_keys(False)
             self.view.hide()
+            if self.right_click:
+                self.right_click.rect = None
             if self.tray and not self.hidden_hint:
                 self.hidden_hint = True
                 key = win32.combo_label(keymap(self.cfg.keys)["toggle"])
@@ -1092,6 +1095,24 @@ class Session(QObject):
         if self.menus and not self.calib and not self.capturing:
             self.menus[-1].move(steps)
 
+    def watch_right_click(self) -> None:
+        """Clic derecho en la autopista (con el ratón pasando a lo de debajo: jugando, sin menú): el menú, como
+        Espacio. Con un menú abierto la ventana ya recibe el ratón y el derecho es «volver» (QML)."""
+        rc = self.right_click
+        if rc is None:
+            return
+        if rc.clicked.is_set():
+            rc.clicked.clear()
+            if not self.menus and not self.calib:
+                self.pause()
+        if self.menus or self.calib or self.dialog_open or not self.view.isVisible():
+            rc.rect = None
+            return
+        left, top, right, bottom = win32.window_rect(int(self.view.winId()))
+        half = (right - left) * self.cfg.highway_width / max(1, self.view.width()) / 2  # la autopista, centrada
+        mid = (left + right) // 2
+        rc.rect = (int(mid - half), top, int(mid + half), bottom)
+
     def idle_inputs(self) -> None:
         """Con el juego oculto no se pinta (ni se llama a frame): aquí se atiende lo que vale estando oculto."""
         for ev in self.inputs.drain():
@@ -1204,6 +1225,7 @@ class Session(QObject):
                            TOAST_S if connected else 6)
             self.guitar_connected = connected
         self.handle_inputs()
+        self.watch_right_click()
         text = bool(self.menus) and isinstance(self.menus[-1], SearchMenu) and not self.calib
         if text != self.text_mode:
             self.text_mode = text
@@ -1642,6 +1664,7 @@ def main() -> int:
     session = bridge.session = Session(chart, cfg, args.difficulty, inputs, view, records, aimp, engine)
     session.set_autoplay(args.autoplay)
     session.tray = make_tray(app, session)
+    session.right_click = win32.RightClick()
     if not args.song and not (aimp.connected() and aimp.state() == PLAYING and session.follow_aimp()):
         session.open_selector()  # si suena AIMP, se le sigue; si no, a elegir canción
     if args.hidden:
@@ -1661,7 +1684,7 @@ def main() -> int:
     idle.timeout.connect(lambda: None if view.isVisible() else session.idle_inputs())
     idle.start(50)
     if args.screenshot:
-        def shot() -> None:  # solo la ventana del juego, con su transparencia (tools/readme_image.py le pone fondo)
+        def shot() -> None:  # solo la ventana del juego, con su transparencia
             view.grabWindow().save(str(args.screenshot))
             app.quit()
         if args.screenshot_menu:
@@ -1682,6 +1705,7 @@ def main() -> int:
     finally:
         inputs.stop()
         engine.stop()
+        session.right_click.stop()
         session.stop_calibration()
         session.player.close()
 

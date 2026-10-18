@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import threading
 import winreg
 from ctypes import wintypes
 
@@ -151,6 +152,69 @@ class KeyCatcher:
         if self.hook:
             user32.UnhookWindowsHookEx(self.hook)
             self.hook = None
+
+
+WH_MOUSE_LL = 14
+WM_RBUTTONDOWN, WM_RBUTTONUP, WM_QUIT = 0x204, 0x205, 0x12
+
+
+class MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [("pt", wintypes.POINT), ("mouseData", wintypes.DWORD), ("flags", wintypes.DWORD),
+                ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, ctypes.c_uint, ctypes.c_uint]
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+
+
+class RightClick:
+    """Clic derecho sobre la autopista mientras la ventana deja pasar el ratón (jugando, sin menú): un gancho de
+    ratón de bajo nivel en su propio hilo, con su bucle de mensajes (así no frena el ratón aunque el juego esté
+    ocupado). Si el clic cae dentro de rect (píxeles de pantalla; None = apagado), se lo queda (no llega a la
+    ventana de debajo, tampoco al soltar) y marca clicked; el resto de clics y movimientos pasan sin más."""
+
+    def __init__(self):
+        self.rect: tuple[int, int, int, int] | None = None
+        self.clicked = threading.Event()
+        self._eat_up = False
+        self._proc = HOOKPROC(self._hook)  # hay que guardarla: si se libera, Windows llama a basura
+        self._tid = 0
+        threading.Thread(target=self._run, daemon=True, name="clic derecho").start()
+
+    def _run(self) -> None:
+        self._tid = kernel32.GetCurrentThreadId()
+        hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self._proc, kernel32.GetModuleHandleW(None), 0)
+        msg = wintypes.MSG()
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            pass
+        if hook:
+            user32.UnhookWindowsHookEx(hook)
+
+    def _hook(self, code: int, wparam: int, lparam: int) -> int:
+        if code >= 0 and wparam in (WM_RBUTTONDOWN, WM_RBUTTONUP):
+            if wparam == WM_RBUTTONUP:
+                if self._eat_up:
+                    self._eat_up = False
+                    return 1
+            elif self.rect is not None:
+                left, top, right, bottom = self.rect
+                pt = ctypes.cast(lparam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents.pt
+                if left <= pt.x < right and top <= pt.y < bottom:
+                    self._eat_up = True
+                    self.clicked.set()
+                    return 1
+        return user32.CallNextHookEx(None, code, wparam, lparam)
+
+    def stop(self) -> None:
+        if self._tid:
+            user32.PostThreadMessageW(self._tid, WM_QUIT, 0, 0)
+
+
+def window_rect(hwnd: int) -> tuple[int, int, int, int]:
+    """(izquierda, arriba, derecha, abajo) de la ventana en píxeles de pantalla."""
+    r = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(r))
+    return r.left, r.top, r.right, r.bottom
 
 
 def vk_of_char(c: str) -> int | None:

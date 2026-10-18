@@ -58,7 +58,7 @@ Una vez instalado:
 | --- | --- | --- |
 | `A` `S` `D` `F` `G` | Trastes | Verde, rojo, amarillo, azul, naranja |
 | `↑` `↓` | Barra de strum | Rasguear (en los menús: moverse) |
-| `Espacio` | `+` | Menú / pausa |
+| `Espacio` · clic derecho en la autopista | `+` | Menú / pausa |
 | `Tab` | `−` | Cambiar de dificultad sin parar |
 | `E` | Levantar la guitarra | Star power |
 | `Retroceso` | | Reiniciar la canción |
