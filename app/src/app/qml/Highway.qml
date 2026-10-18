@@ -114,17 +114,41 @@ Item {
             PathLine { x: root.xAt(-0.5, -0.25); y: root.yAt(-0.25) }
         }
     }
-    Repeater {  // separaciones entre carriles y bordes
-        model: 6
+    Repeater {  // separaciones entre carriles
+        model: 4
         Shape {
             anchors.fill: parent
-            readonly property bool edge: index === 0 || index === 5
             ShapePath {
-                strokeWidth: parent.edge ? 4 : 1.5
-                strokeColor: parent.edge ? "#aaffffff" : "#30ffffff"
-                fillColor: "transparent"
-                startX: root.xAt(index - 0.5, 1); startY: root.horizonY
-                PathLine { x: root.xAt(index - 0.5, -0.25); y: root.yAt(-0.25) }
+                strokeWidth: 1.5; strokeColor: "#2cffffff"; fillColor: "transparent"
+                startX: root.xAt(index + 0.5, 1); startY: root.horizonY
+                PathLine { x: root.xAt(index + 0.5, -0.25); y: root.yAt(-0.25) }
+            }
+        }
+    }
+    Repeater {  // raíles metálicos a los lados
+        model: 2
+        Shape {
+            id: rail
+            anchors.fill: parent
+            readonly property real inner: index === 0 ? -0.5 : 4.5
+            readonly property real outer: index === 0 ? -0.62 : 4.62
+            ShapePath {
+                strokeWidth: 0; strokeColor: "transparent"
+                fillGradient: LinearGradient {
+                    y1: root.horizonY; y2: root.yAt(-0.25)
+                    GradientStop { position: 0; color: "#00838894" }
+                    GradientStop { position: 0.35; color: "#a0596069" }
+                    GradientStop { position: 1; color: "#f0a3a9b5" }
+                }
+                startX: root.xAt(rail.inner, 1); startY: root.horizonY
+                PathLine { x: root.xAt(rail.outer, 1); y: root.horizonY }
+                PathLine { x: root.xAt(rail.outer, -0.25); y: root.yAt(-0.25) }
+                PathLine { x: root.xAt(rail.inner, -0.25); y: root.yAt(-0.25) }
+            }
+            ShapePath {  // filo de luz en el lado de dentro
+                strokeWidth: 1.5; strokeColor: "#90ffffff"; fillColor: "transparent"
+                startX: root.xAt(rail.inner, 1); startY: root.horizonY
+                PathLine { x: root.xAt(rail.inner, -0.25); y: root.yAt(-0.25) }
             }
         }
     }
@@ -142,14 +166,6 @@ Item {
     }
 
     // ---------- línea de golpeo ----------
-    Rectangle {  // halo de la línea
-        x: root.xAt(-0.5, 0); width: root.xAt(4.5, 0) - x; y: root.strikeY - 7; height: 14; radius: 7
-        color: Qt.tint("#18ffffff", Qt.rgba(1, 0.12, 0.12, root.f.missFlash * 0.5))
-    }
-    Rectangle {
-        x: root.xAt(-0.5, 0); width: root.xAt(4.5, 0) - x; y: root.strikeY - 1.5; height: 3
-        color: Qt.tint("#bbffffff", Qt.rgba(1, 0.12, 0.12, root.f.missFlash * 0.85))
-    }
     Repeater {  // botones de la línea de golpeo: se hunden y se encienden al pulsar; tiemblan al fallar
         model: 5
         Item {
