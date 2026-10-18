@@ -418,11 +418,21 @@ class Session(QObject):
         """Lo que no tiene chart en las carpetas; con «Generar en segundo plano», a la cola del motor."""
         self.missing = without_chart(self.music, scan())
         self._tree = None
+        self.refresh_welcome()
         if self.cfg.background and self.missing:
             if installer.needed():
                 self.offer_install()
             else:
                 self.engine.add(self.missing)
+
+    def refresh_welcome(self) -> None:
+        """La bienvenida abierta se rehace (con «Elegir canción» si ya hay canciones), en la misma opción."""
+        for i, m in enumerate(self.menus):
+            if m.title == "Music Hero" and not m.editing:
+                label = m.options[m.sel].label if m.options else ""
+                new = self.welcome_menu()
+                new.sel = next((j for j, o in enumerate(new.options) if o.label == label), 0)
+                self.menus[i] = new
 
     def chart_state(self, audio: str) -> str:
         """Estado de una canción sin chart: «generando», «en cola», «falló» o «sin chart»."""
@@ -608,9 +618,12 @@ class Session(QObject):
                                   "(bajo la tapa de las pilas).<br><br>" + (said[-1] if said else "")))
 
     def welcome_menu(self) -> Menu:
+        """Sin canciones todavía. «Elegir canción», cuando ya hay alguna en las carpetas (aunque sin chart: al
+        elegirla se hace la primera); refresh_welcome() la añade al encontrarlas."""
+        choose = [Option("Elegir canción", self.open_selector)] if self.tree() else []
         return Menu("Music Hero", [
             Option("Añadir la carpeta de tu música", lambda: self.menus.append(self.library_menu())),
-            Option("Elegir canción", self.open_selector),
+            *choose,
             Option("Emparejar la guitarra de Wii", lambda: self.menus.append(self.pairing_menu())),
             Option("Ajustes", lambda: self.menus.append(self.settings_menu()), sep=True),
             sep_above(self.leave_option()),
