@@ -1,4 +1,4 @@
-"""Win32 para el overlay y el teclado (técnicas del Lander, probadas en la fase 0: tools/poc_overlay.py)."""
+"""Win32 para el overlay y el teclado (técnicas del Lander, probadas en la fase 0)."""
 
 from __future__ import annotations
 

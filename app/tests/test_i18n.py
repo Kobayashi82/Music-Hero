@@ -10,12 +10,14 @@ from app import i18n
 from app.lang_en import EN
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "app"
+TOOLS = [SRC.parents[2] / "tools" / f for f in ("wii_guitar_monitor.py", "wii_tilt_monitor.py",
+                                                  "measure_aimp_latency.py")]  # los de tools/ que usan la app
 
 
 def keys() -> dict[str, str]:
     """texto -> dónde aparece."""
     found = {}
-    for path in SRC.glob("*.py"):
+    for path in [*SRC.glob("*.py"), *TOOLS]:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if (isinstance(node, ast.Call) and getattr(node.func, "id", None) in ("t", "N_") and node.args
                     and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
@@ -48,7 +50,7 @@ def test_sin_traducciones_sobrantes():
 def test_t_no_queda_tapada():
     """Una variable local t (el tiempo, en muchos sitios) tapa la función t() en toda la función."""
     bad = []
-    for path in SRC.glob("*.py"):
+    for path in [*SRC.glob("*.py"), *TOOLS]:
         for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(fn, (ast.FunctionDef, ast.Lambda)):
                 local = any(isinstance(n, ast.Name) and n.id == "t" and isinstance(n.ctx, ast.Store)

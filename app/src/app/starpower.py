@@ -18,7 +18,7 @@ MIN_NOTES = 4  # un tramo con menos notas no vale (silencios, intros): se busca 
 DEFAULT_BEAT_MS = 500.0  # sin pulsos en la chart: 120 ppm
 
 # Guitarra levantada. El Wiimote va metido en el cuerpo y su eje Y sigue al mástil (medido con
-# tools/poc_wii_tilt.py: tocando, y ≈ 0, a veces −0,4 con la guitarra algo inclinada; con el mástil
+# tools/wii_tilt_monitor.py: tocando, y ≈ 0, a veces −0,4 con la guitarra algo inclinada; con el mástil
 # levantado, y ≈ −1). Se filtra para que los golpes del rasgueo no cuenten.
 TILT_AXIS = 1
 TILT_ON, TILT_OFF = -0.65, -0.45  # ~40° para activarlo; por encima de ~27° se da por bajada (para la próxima)

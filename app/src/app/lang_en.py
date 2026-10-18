@@ -334,6 +334,32 @@ EN: dict[str, str] = {
     "Ocultar ({key})": "Hide ({key})",
     "Mostrar ({key})": "Show ({key})",
 
+    # ---------- diagnóstico (tools/) ----------
+    "(nada)": "(nothing)",
+    "ninguna": "none",
+    "STRUM ARRIBA": "STRUM UP",
+    "STRUM ABAJO": "STRUM DOWN",
+    "palanca {v:.2f}": "whammy {v:.2f}",
+    "Toca. Ctrl+C para salir.": "Play. Ctrl+C to quit.",
+    "{n} informes": "{n} reports",
+    "({n:.0f} informes/s)": "({n:.0f} reports/s)",
+    "Wiimote abierto. Extensión: {ext}": "Wiimote open. Extension: {ext}",
+    "(guitarra)": "(guitar)",
+    "(¡no es la guitarra!)": "(not the guitar!)",
+    "calibración {calib}; guitarra: {guitar}": "calibration {calib}; guitar: {guitar}",
+    "Sostén la guitarra como para tocar. Cuando lo pida, levanta el mástil (como en Guitar Hero) y bájalo.":
+        "Hold the guitar as if playing. When asked, tilt the neck up (like in Guitar Hero) and lower it again.",
+    "postura normal": "normal position",
+    "¡LEVANTA el mástil!": "TILT the neck UP!",
+    "vuelve a la postura normal": "back to normal position",
+    "media normal": "normal mean",
+    "media levantada": "tilted mean",
+    "cambio": "change",
+    "el juego la da por levantada: star power": "the game counts it as tilted: star power",
+    "AIMP no está sonando": "AIMP isn't playing",
+    "No se pudo medir (¿hay otro sonido a la vez, o un ecualizador fuerte en AIMP?)":
+        "Couldn't measure it (is another sound playing, or a strong equalizer in AIMP?)",
+
     # ---------- consola ----------
     "No hay chart para {name}; genérala con: uv run --project generator generate \"{path}\"":
         "No chart for {name}; generate it with: uv run --project generator generate \"{path}\"",
