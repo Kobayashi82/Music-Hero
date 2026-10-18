@@ -328,9 +328,6 @@ EN: dict[str, str] = {
     "{n} partidas · el {date}": "{n} games · on {date}",
 
     # ---------- icono de la bandeja ----------
-    "Music Hero sigue aquí": "Music Hero is still here",
-    "{key} o un clic en este icono para volver; para salir, clic derecho en el icono.":
-        "{key} or click this icon to come back; to quit, right-click the icon.",
     "Ocultar ({key})": "Hide ({key})",
     "Mostrar ({key})": "Show ({key})",
 

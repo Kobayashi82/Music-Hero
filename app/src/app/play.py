@@ -133,7 +133,6 @@ class Session(QObject):
         self.mouse_on = False  # la ventana recibe el ratón (hay un menú abierto)
         self.tray: QSystemTrayIcon | None = None  # icono junto al reloj (main)
         self.right_click: win32.RightClick | None = None  # clic derecho en la autopista: el menú (main)
-        self.hidden_hint = False  # ya se avisó de que oculto sigue en el icono
         self.strum_hold: tuple[int, float, float] | None = None  # strum mantenido en un menú: (dirección, desde, siguiente)
         self.message = "; ".join(inputs.errors)
         self.autoplay = False
@@ -237,12 +236,6 @@ class Session(QObject):
             self.view.hide()
             if self.right_click:
                 self.right_click.rect = None
-            if self.tray and not self.hidden_hint:
-                self.hidden_hint = True
-                key = win32.combo_label(keymap(self.cfg.keys)["toggle"])
-                self.tray.showMessage(t("Music Hero sigue aquí"),
-                                      t("{key} o un clic en este icono para volver; para salir, clic derecho en el "
-                                        "icono.", key=key), QSystemTrayIcon.MessageIcon.NoIcon, 4000)
         else:
             if self.follow and not self.waiting:
                 self.resync()  # oculto no se pinta ni se juzga: se sigue desde donde va AIMP
