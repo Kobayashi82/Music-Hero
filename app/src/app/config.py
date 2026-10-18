@@ -24,6 +24,8 @@ class Config:
     hud_side: str = "right"  # marcador a la izquierda o a la derecha de la autopista
     aimp_offset_ms: float = 230.0  # lo que AIMP tarda en hacer sonar su posición (su búfer); el juego lo mide solo
     keys: dict = field(default_factory=dict)  # teclas cambiadas en Ajustes (acción -> tecla; ver inputs.ACTIONS)
+    library_dirs: list = field(default_factory=list)  # carpetas de música (Ajustes → Biblioteca)
+    background: bool = True  # generar en segundo plano las canciones de esas carpetas que no tengan chart
 
     @classmethod
     def load(cls) -> Config:

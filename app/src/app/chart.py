@@ -7,8 +7,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
-CHARTS_DIR = ROOT / "out" / "charts"
+from .paths import CHARTS_DIR
 DIFFS = ("expert", "hard", "medium", "easy")
 DIFF_NAMES = {"expert": "Experto", "hard": "Difícil", "medium": "Medio", "easy": "Fácil"}
 

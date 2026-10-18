@@ -6,6 +6,9 @@ música: así "Queen & David Bowie" sigue dentro de Queen. Los prefijos numéric
 Artista/Álbum/, se usan las etiquetas que guardó el generador en la chart.
 
 El índice se guarda en %APPDATA%/MusicHero/library.json y solo se relee la chart que haya cambiado.
+
+Las carpetas de música (Ajustes → Biblioteca, fase 7) se recorren en un hilo (MusicWatcher) al empezar y cada
+pocos minutos: lo que no tiene chart va a la cola del motor, y en el selector sale con su estado.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -24,11 +28,13 @@ LIBRARY_FILE = CONFIG_FILE.parent / "library.json"
 _PREFIX = re.compile(r"^\s*(\d+)\s*[-.)_]\s*")
 NO_ALBUM = "(sin álbum)"
 NO_ARTIST = "(sin artista)"
+AUDIO_EXT = {".mp3", ".flac", ".ogg", ".opus", ".m4a", ".wav", ".wma"}  # las mismas que generator/cli.py
+RESCAN_S = 600  # cada cuánto se vuelven a recorrer las carpetas (canciones nuevas)
 
 
 @dataclass
 class Entry:
-    folder: str  # carpeta de la chart
+    folder: str  # carpeta de la chart ("" si aún no tiene: pending_entries)
     audio: str
     sha: str
     title: str
@@ -115,6 +121,73 @@ def group(entries: list[Entry]) -> dict[str, dict[str, list[Entry]]]:
         ordered = sorted(albums, key=lambda a: (albums[a][0].album_order or 10**6, a.casefold()))
         out[artist] = {a: sorted(albums[a], key=lambda e: (e.track or 10**6, e.title.casefold())) for a in ordered}
     return out
+
+
+def norm(path: str) -> str:
+    """Para comparar rutas en Windows (mayúsculas, barras)."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def find_music(dirs: list[str]) -> list[str]:
+    """Archivos de audio de las carpetas (y subcarpetas), sin repetir y ordenados."""
+    found: dict[str, str] = {}
+    for d in dirs:
+        for root, _, files in os.walk(d):
+            for f in files:
+                if os.path.splitext(f)[1].lower() in AUDIO_EXT:
+                    p = os.path.join(root, f)
+                    found.setdefault(norm(p), p)
+    return sorted(found.values(), key=str.casefold)
+
+
+def without_chart(music: list[str], entries: list[Entry]) -> list[str]:
+    have = {norm(e.audio) for e in entries}
+    return [m for m in music if norm(m) not in have]
+
+
+def in_dirs(path: str, dirs: list[str]) -> bool:
+    p = norm(path)
+    return any(p.startswith(norm(d).rstrip("\\/") + os.sep) for d in dirs)
+
+
+def pending_entries(files: list[str]) -> list[Entry]:
+    """Canciones sin chart, para el selector (el título sale del nombre del archivo en group)."""
+    return [Entry("", f, "", "", "", "", 0) for f in files]
+
+
+class MusicWatcher:
+    """Recorre las carpetas en un hilo: al cambiarlas y cada RESCAN_S. take() da el resultado nuevo (o None)."""
+
+    def __init__(self, interval_s: float = RESCAN_S):
+        self.interval = interval_s
+        self._dirs: list[str] = []
+        self._result: list[str] | None = None
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def set_dirs(self, dirs: list[str]) -> None:
+        self._dirs = list(dirs)
+        self._wake.set()
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._run, daemon=True, name="biblioteca")
+            self._thread.start()
+
+    def take(self) -> list[str] | None:
+        with self._lock:
+            r, self._result = self._result, None
+        return r
+
+    def _run(self) -> None:
+        while True:
+            self._wake.wait(self.interval)
+            self._wake.clear()
+            try:
+                files = find_music(self._dirs)
+            except OSError:
+                continue
+            with self._lock:
+                self._result = files
 
 
 def fold(text: str) -> str:

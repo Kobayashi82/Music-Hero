@@ -23,28 +23,30 @@ import bisect
 import os
 import random
 import re
-import shutil
 import signal
-import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
+import numpy as np
+
 from PySide6.QtCore import QObject, QPointF, Qt, QTimer, QUrl, Slot
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap, QPolygonF, QSurfaceFormat
 from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
-from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QSystemTrayIcon
 
-from . import calibration, loopback, starpower, win32
+from . import calibration, loopback, pairing, starpower, win32
 from .aimp import CMD_NEXT, CMD_PAUSE, CMD_PREV, PLAYING, Aimp, AimpPlayer, Track
-from .chart import DIFF_NAMES, DIFFS, ROOT, Chart, find_chart
+from .chart import DIFF_NAMES, DIFFS, Chart, find_chart
 from .config import Config
+from .engine import EngineClient
 from .gameplay import HIT, MISSED, SKIPPED, Game
 from .inputs import ACTION_NAMES, ACTIONS, BACKSPACE, GLOBAL_ACTIONS, Inputs, assign, keymap
-from .library import Entry, group, scan, search
+from .library import Entry, MusicWatcher, group, in_dirs, norm, pending_entries, scan, search, without_chart
 from .lyrics import Lyrics
 from .menu import Menu, Option, SearchMenu, cycler, stepper
+from .paths import CHARTS_DIR
 from .player import Player
 from .records import Play, Records
 from .sprites import SpriteProvider
@@ -65,14 +67,24 @@ MENU_REPEAT_S = (0.35, 0.08, 0.035)  # strum mantenido en un menú: espera, repe
 SIDES = {"left": "Izquierda", "right": "Derecha"}
 AIMP_CHECK_S = 0.3  # cada cuánto se mira qué canción tiene AIMP
 OWN_SEEK_S = 0.6  # los saltos que hace el propio juego en AIMP (reiniciar) no cuentan como saltos del usuario
-GENERATE_LOG = ROOT / "out" / "generate_aimp.log"
 SONG_COMMANDS = ("next", "prev", "random")  # botones 1, 2 y Home del Wiimote
 PHRASE_FLASH_S = 0.6  # la barra de star power se enciende al completar una frase
+WELCOME = ("Para jugar, Music Hero necesita tu música: elige la carpeta donde la tienes y hará las charts "
+           "(notas y letra) en segundo plano, primero la canción que elijas.")
+
+
+def blank_chart() -> Chart:
+    """Sin ninguna canción con chart todavía (recién instalado): una vacía, sin notas, mientras se hacen."""
+    return Chart("Music Hero", "", Path(""), "", 0, [], {"expert": []}, CHARTS_DIR)
+
+
+def blank_player(volume: float) -> Player:
+    return Player((np.zeros((4800, 2), np.float32), 48000), 0.0, 0.0, volume)
 
 
 class Session(QObject):
     def __init__(self, chart: Chart, cfg: Config, difficulty: str | None, inputs: Inputs, view: QQuickView,
-                 records: Records | None = None, aimp: Aimp | None = None):
+                 records: Records | None = None, aimp: Aimp | None = None, engine: EngineClient | None = None):
         super().__init__()
         self.cfg, self.inputs, self.view = cfg, inputs, view
         self.records = records or Records()
@@ -84,8 +96,12 @@ class Session(QObject):
         self.waiting = ""  # siguiendo a AIMP, su canción no tiene chart: el aviso (y no se juega)
         self.aimp_check = 0.0
         self.own_seek_until = 0.0
-        self.gen_proc: subprocess.Popen | None = None  # chart generándose en segundo plano
-        self.gen_file, self.gen_name = "", ""
+        self.engine = engine or EngineClient()  # genera las charts en otro proceso (engine.py)
+        self.wanted: str | None = None  # canción sin chart que ha elegido el usuario: se juega en cuanto esté
+        self.watcher = MusicWatcher()  # recorre las carpetas de música en un hilo
+        self.music: list[str] = []  # todo el audio de las carpetas
+        self.missing: list[str] = []  # el que aún no tiene chart
+        self.dialog_open = False  # diálogo de Windows abierto (elegir carpeta): el juego no se pone encima
         self._by_path: dict[str, Entry] | None = None
         self.synced = False  # retardo de AIMP ya medido desde que se le sigue
         self.sync_thread: threading.Thread | None = None
@@ -115,11 +131,15 @@ class Session(QObject):
         self.partial = False  # la partida no cuenta para récords (automático o empezada a mitad)
         self.record_toast = False  # ya se avisó de que se ha superado el récord en esta partida
         self.load_song(chart, difficulty)
+        if cfg.library_dirs:
+            self.watcher.set_dirs(cfg.library_dirs)
 
     def load_song(self, chart: Chart, difficulty: str | None = None, player: AimpPlayer | None = None) -> None:
         """Pone esta canción (al empezar, desde el selector o la que suena en AIMP, con player): su dificultad es
         la pedida, la última elegida en ella o la de por defecto."""
         self.stop_calibration()
+        if not chart.audio_sha256:
+            player = blank_player(self.cfg.volume)
         player = player or Player(chart.audio_file, self.cfg.audio_offset_ms, LEAD_IN_MS, self.cfg.volume)
         if self.player:
             self.player.close()
@@ -137,7 +157,8 @@ class Session(QObject):
         self.menus.clear()
         self.results, self.resume_at = "", None
         self.flash_t, self.miss_lane_t, self.miss_t = [0.0] * 5, [0.0] * 5, 0.0
-        self.records.set_last(chart.audio_sha256)
+        if chart.audio_sha256:
+            self.records.set_last(chart.audio_sha256)
         self.new_game()
         if self.player.lead_in:  # el propio; AIMP ya está sonando (o en pausa, como lo haya dejado el usuario)
             self.player.play()
@@ -279,7 +300,6 @@ class Session(QObject):
         if now < self.aimp_check:
             return
         self.aimp_check = now + AIMP_CHECK_S
-        self.check_generation()
         if not self.follow:
             return
         if not self.aimp.connected():
@@ -331,7 +351,7 @@ class Session(QObject):
             print(f"chart de {track.file}: {err}")
             chart = None
         if chart is None:
-            generating = self.gen_proc is not None and self.gen_file == track.file
+            generating = self.chart_state(track.file) in ("en cola", "generando")
             self.waiting = (f"«{self.aimp_title}» no tiene chart todavía"
                             + (" (generándola…)" if generating else ": + / Espacio para generarla"))
             self.player.close()  # sin chart no se juega, pero la pausa y el seguir siguen siendo los de AIMP
@@ -347,39 +367,201 @@ class Session(QObject):
         self.toast(f"AIMP: {chart.artist} – {chart.title} · {DIFF_NAMES[self.difficulty]}")
 
     def generate_current(self) -> None:
-        """Genera en segundo plano la chart de la canción de AIMP (Demucs, modelo y letra: ~1 min con GPU)."""
-        uv = shutil.which("uv")
-        if self.gen_proc is not None or not self.aimp_file or uv is None:
-            self.toast("Ya se está generando otra" if self.gen_proc else "No se puede generar (¿falta uv?)")
+        """Genera la chart de la canción de AIMP (delante de la cola del motor: ~1 min con GPU)."""
+        if not self.aimp_file or not self.request_chart(self.aimp_file, self.aimp_title):
             return
-        GENERATE_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with open(GENERATE_LOG, "w", encoding="utf-8") as log:  # el proceso hereda su propia copia
-            flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS
-            env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}  # el del juego no es el del generador
-            self.gen_proc = subprocess.Popen(
-                [uv, "run", "--project", str(ROOT / "generator"), "generate", self.aimp_file],
-                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, creationflags=flags, env=env)
-        self.gen_file, self.gen_name = self.aimp_file, self.aimp_title
         self.waiting = f"«{self.aimp_title}» no tiene chart todavía (generándola…)"
         self.resume()
 
-    def check_generation(self) -> None:
-        if self.gen_proc is None or self.gen_proc.poll() is None:
+    # ---------- biblioteca y motor ----------
+
+    @property
+    def blank(self) -> bool:
+        """Todavía sin ninguna canción (recién instalado): no hay nada que jugar."""
+        return not self.chart.audio_sha256
+
+    def tick_library(self, now: float) -> None:
+        """Cada fotograma (y oculto, cada 50 ms): lo que ha encontrado el vigilante de carpetas y lo que dice el
+        motor. El motor se pausa mientras se juega."""
+        music = self.watcher.take()
+        if music is not None:
+            self.music = music
+            self.update_missing()
+        for ev in self.engine.poll():
+            kind = ev.get("event")
+            if kind == "done":
+                self._by_path = self._tree = None  # índice nuevo: ya está la chart
+                self.missing = [m for m in self.missing if norm(m) != norm(ev["file"])]
+                self.chart_ready(ev["file"])
+            elif kind == "error" and ev.get("file"):
+                self.chart_failed(ev["file"], ev.get("message", ""))
+        st = self.engine.state
+        if self.wanted and st.current and norm(st.current) == norm(self.wanted):
+            self.toast(f"Generando la chart de «{Path(self.wanted).stem}»: {round(st.done * 100)} %", 1.0)
+        playing = (self.view.isVisible() and self.player.playing and not self.menus and not self.waiting
+                   and not self.calib and not self.blank)
+        self.engine.set_paused(playing)
+
+    def update_missing(self) -> None:
+        """Lo que no tiene chart en las carpetas; con «Generar en segundo plano», a la cola del motor."""
+        self.missing = without_chart(self.music, scan())
+        self._tree = None
+        if self.cfg.background and self.missing:
+            self.engine.add(self.missing)
+
+    def chart_state(self, audio: str) -> str:
+        """Estado de una canción sin chart: «generando», «en cola», «falló» o «sin chart»."""
+        st = self.engine.state
+        if st.current and norm(st.current) == norm(audio):
+            return "generando"
+        pending, failed = self.engine.snapshot()
+        key = os.path.normcase(audio)
+        return "falló" if key in failed else "en cola" if key in pending else "sin chart"
+
+    def request_chart(self, audio: str, title: str) -> bool:
+        """El usuario quiere esta canción: delante de la cola del motor (aunque hubiera fallado antes)."""
+        if not self.engine.available():
+            self.toast("No se puede generar la chart: el motor no está instalado", 6)
+            return False
+        self.engine.add([audio], front=True)
+        self.wanted = audio
+        self.toast(f"Generando la chart de «{title}»… (en torno a 1 min con GPU)", 5)
+        return True
+
+    def chart_ready(self, audio: str) -> None:
+        if self.wanted and norm(self.wanted) == norm(audio):
+            self.wanted = None
+            e = next((e for e in scan() if norm(e.audio) == norm(audio)), None)
+            if e is not None:
+                self._load_entry(e)
             return
-        ok = self.gen_proc.returncode == 0
-        self.gen_proc = None
-        self._by_path = self._tree = None  # índice nuevo: ya está la chart
-        current = self.follow and self.aimp_file == self.gen_file
-        if not ok:
-            self.toast(f"No se pudo generar la chart de {self.gen_name} (out/generate_aimp.log)", 8)
-            if current:
-                self.waiting = f"«{self.gen_name}» no tiene chart: falló al generarla"
+        if self.follow and self.waiting and self.aimp_file and norm(self.aimp_file) == norm(audio):
+            track = self.aimp.track()
+            if track is not None and norm(track.file) == norm(audio):
+                self.open_aimp_track(track)
             return
-        track = self.aimp.track() if current else None
-        if track is not None and track.file == self.gen_file:
-            self.open_aimp_track(track)
-        else:
-            self.toast(f"Chart de {self.gen_name} lista", 5)
+        if self.blank and (not self.menus or self.menus[-1].title == "Music Hero"):  # la primera de todas
+            self.toast("¡Ya hay canciones para jugar!", 5)
+            self.open_selector()
+
+    def chart_failed(self, audio: str, message: str) -> None:
+        name = Path(audio).stem
+        if self.wanted and norm(self.wanted) == norm(audio):
+            self.wanted = None
+            self.toast(f"No se pudo generar la chart de «{name}»: {message[:120]}", 8)
+        if self.follow and self.waiting and self.aimp_file and norm(self.aimp_file) == norm(audio):
+            self.waiting = f"«{name}» no tiene chart: falló al generarla"
+
+    def library_line(self) -> str:
+        """Una línea con lo que está haciendo el motor (Ajustes → Biblioteca, el icono de la bandeja)."""
+        st = self.engine.state
+        if st.current:
+            line = f"generando «{Path(st.current).stem}» ({round(st.done * 100)} %)"
+            if st.pending > 1:
+                line += f" · {st.pending - 1} más en cola"
+            return line + (" · en pausa mientras juegas" if st.paused else "")
+        if st.pending:
+            return f"{st.pending} en cola" + (" · en pausa mientras juegas" if st.paused else "")
+        if self.missing and not self.cfg.background:
+            return f"{len(self.missing)} sin chart (generar en segundo plano: no)"
+        return "al día" if self.cfg.library_dirs else "sin carpetas de música"
+
+    def library_menu(self) -> Menu:
+        cfg = self.cfg
+
+        def set_background(v: bool) -> None:
+            cfg.background = v
+            cfg.save()
+            if v:
+                self.update_missing()
+            else:  # fuera de la cola lo de las carpetas (lo que haya pedido el usuario, no)
+                self.engine.remove([m for m in self.missing if not (self.wanted and norm(m) == norm(self.wanted))])
+
+        opts = [Option("Añadir carpeta", lambda: QTimer.singleShot(0, self.add_library_dir))]
+        opts += [Option(Path(d).name or d, lambda d=d: self.menus.append(self.folder_menu(d)), value="carpeta")
+                 for d in cfg.library_dirs]
+        opts.append(Option("Generar en segundo plano", value=lambda: "Sí" if cfg.background else "No",
+                           change=cycler([False, True], lambda: cfg.background, set_background)))
+        opts.append(Option("Reintentar las que fallaron", self.engine.retry))
+        opts.append(Option("Volver", self.menu_back))
+        return Menu("Biblioteca", opts, body=self.library_body)
+
+    def library_body(self) -> str:
+        st = self.engine.state
+        total, missing = len(self.music), len(self.missing)
+        lines = [f"{len(self.cfg.library_dirs)} carpetas · {total} canciones · {total - missing} con chart"
+                 if self.cfg.library_dirs else "Añade la carpeta donde tienes tu música."]
+        lines.append(f"Ahora: {self.library_line()}")
+        if st.failed:
+            lines.append(f"{st.failed} no se pudieron generar (detalles en {self.engine.log.name})")
+        if st.device == "cpu":
+            lines.append("Sin tarjeta NVIDIA: cada canción tarda varios minutos")
+        if st.error:
+            lines.append(st.error)
+        return "<br>".join(lines)
+
+    def folder_menu(self, folder: str) -> Menu:
+        def drop() -> None:
+            self.cfg.library_dirs = [d for d in self.cfg.library_dirs if d != folder]
+            self.cfg.save()
+            self.engine.remove([m for m in self.music if in_dirs(m, [folder])])
+            self.watcher.set_dirs(self.cfg.library_dirs)
+            self.menus.pop()  # este
+            self.menus.pop()  # y la biblioteca, que se vuelve a abrir con las carpetas de ahora
+            self.menus.append(self.library_menu())
+        return Menu(Path(folder).name or folder, [Option("Quitar de la biblioteca", drop),
+                                                 Option("Volver", self.menu_back)],
+                    body=f"{folder}<br>Al quitarla no se borra nada: las charts hechas se quedan, pero deja de "
+                         "buscar canciones nuevas ahí.")
+
+    def add_library_dir(self) -> None:
+        """Diálogo de Windows para elegir la carpeta. Mientras está abierto, el juego se aparta (se oculta y suelta
+        el teclado) para que se pueda usar."""
+        self.dialog_open = True
+        self.inputs.set_game_keys(False)
+        self.view.hide()
+        start = self.cfg.library_dirs[-1] if self.cfg.library_dirs else str(Path.home() / "Music")
+        try:
+            folder = QFileDialog.getExistingDirectory(None, "Carpeta de tu música", start)
+        finally:
+            self.dialog_open = False
+            self.view.show()
+            win32.make_click_through(int(self.view.winId()))
+            self.mouse_on = False
+            self.inputs.set_game_keys(True)
+        if not folder:
+            return
+        folder = str(Path(folder))
+        if any(norm(folder) == norm(d) or in_dirs(folder, [d]) for d in self.cfg.library_dirs):
+            self.toast("Esa carpeta ya está en la biblioteca")
+            return
+        self.cfg.library_dirs = [d for d in self.cfg.library_dirs if not in_dirs(d, [folder])] + [folder]
+        self.cfg.save()
+        self.watcher.set_dirs(self.cfg.library_dirs)
+        self.toast(f"Buscando canciones en {folder}…", 4)
+        if self.menus and self.menus[-1].title == "Biblioteca":
+            self.menus[-1] = self.library_menu()
+
+    def pairing_menu(self) -> Menu:
+        """Emparejar la guitarra (el Wiimote) con Windows: busca en un hilo y enseña los avisos."""
+        stop, said = threading.Event(), []
+        threading.Thread(target=pairing.pair, args=(said.append, stop), daemon=True, name="emparejar").start()
+
+        def leave() -> None:
+            stop.set()
+            self.menu_back()
+        return Menu("Emparejar la guitarra", [Option("Volver", leave)],
+                    body=lambda: ("Con la guitarra enchufada al Wiimote, pulsa el botón rojo de sync del Wiimote "
+                                  "(bajo la tapa de las pilas).<br><br>" + (said[-1] if said else "")))
+
+    def welcome_menu(self) -> Menu:
+        return Menu("Music Hero", [
+            Option("Añadir la carpeta de tu música", lambda: self.menus.append(self.library_menu())),
+            Option("Elegir canción", self.open_selector),
+            Option("Emparejar la guitarra de Wii", lambda: self.menus.append(self.pairing_menu())),
+            Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
+            self.leave_option(),
+        ], body=lambda: WELCOME + (f"<br><br>Biblioteca: {self.library_line()}" if self.cfg.library_dirs else ""))
 
     # ---------- menús ----------
 
@@ -411,12 +593,19 @@ class Session(QObject):
     # ---------- selector de canciones ----------
 
     def tree(self) -> dict[str, dict[str, list[Entry]]]:
+        """Las canciones con chart y, de las carpetas de música, las que aún no la tienen."""
         if self._tree is None:
-            self._tree = group(scan())
+            self._tree = group(scan() + pending_entries(self.missing))
         return self._tree
 
     def song_value(self, e: Entry) -> str:
-        """A la derecha de cada canción: su récord (en la dificultad que se le pondría) y la duración."""
+        """A la derecha de cada canción: su récord (en la dificultad que se le pondría) y la duración; si aún no
+        tiene chart, en qué está."""
+        if not e.folder:
+            state = self.chart_state(e.audio)
+            if state == "generando":
+                return f"generando {round(self.engine.state.done * 100)} %"
+            return state
         d = self.records.difficulty(e.sha) or self.cfg.difficulty
         best = self.records.best(e.sha, d)
         length = f"{e.duration_ms // 60000}:{e.duration_ms // 1000 % 60:02d}"
@@ -427,14 +616,20 @@ class Session(QObject):
         self.pause()
         tree = self.tree()
         if not tree:
-            self.toast("No hay canciones con chart en out/charts")
+            if self.blank and self.menus and self.menus[-1].title == "Pausa":  # pause() la acaba de abrir
+                self.menus[-1] = self.welcome_menu()
+            self.toast("Todavía no hay canciones: añade la carpeta de tu música" if not self.music
+                       else "Buscando canciones…")
             return
         here = next(((a, al, i) for a, albums in tree.items() for al, songs in albums.items()
                      for i, e in enumerate(songs) if e.sha == self.chart.audio_sha256), None)
         total = sum(len(s) for albums in tree.values() for s in albums.values())
+        body = f"{total} canciones de {len(tree)} artistas"
+        if self.missing:
+            body += f" ({len(self.missing)} aún sin chart: elige una y se hace la primera)"
         root = Menu("Canciones", [Option("Buscar", self.open_search), Option("Al azar", self.play_random)] + [
             Option(a, lambda a=a: self.open_artist(a), value=str(sum(len(s) for s in tree[a].values())))
-            for a in tree], body=f"{total} canciones de {len(tree)} artistas")
+            for a in tree], body=body)
         self.menus.append(root)
         if here:
             artist, album, i = here
@@ -471,6 +666,9 @@ class Session(QObject):
         self.menus.append(SearchMenu("Buscar canción", results))
 
     def choose(self, e: Entry) -> None:
+        if not e.folder:  # aún sin chart: delante de la cola, y se juega en cuanto esté
+            self.request_chart(e.audio, e.title)
+            return
         if e.sha == self.chart.audio_sha256:
             self.restart()
             return
@@ -492,13 +690,13 @@ class Session(QObject):
 
     def play_random(self) -> None:
         songs = [e for albums in self.tree().values() for s in albums.values() for e in s
-                 if e.sha != self.chart.audio_sha256]
+                 if e.folder and e.sha != self.chart.audio_sha256]
         if songs:
             self.choose(random.choice(songs))
 
     def pause_menu(self) -> Menu:
         extra = []
-        if self.waiting and self.gen_proc is None:
+        if self.waiting and self.aimp_file and self.chart_state(self.aimp_file) not in ("en cola", "generando"):
             extra.append(Option("Generar la chart", self.generate_current))
         if not self.follow and self.aimp.connected() and self.aimp.track() is not None:
             extra.append(Option("Seguir a AIMP", self.follow_from_menu))
@@ -523,6 +721,8 @@ class Session(QObject):
     def pause_body(self) -> str:
         if self.waiting:
             return f"AIMP: {self.waiting}"
+        if self.blank:
+            return f"Todavía no hay canciones. Biblioteca: {self.library_line()}"
         source = "AIMP · " if self.follow else ""
         return f"{source}{self.chart.artist} – {self.chart.title}<br>{self.record_line()}"
 
@@ -560,6 +760,7 @@ class Session(QObject):
             return f"{round(v * 100)} %"
 
         return Menu("Ajustes", [
+            Option("Biblioteca", lambda: self.menus.append(self.library_menu()), value=self.library_short),
             Option("Dificultad por defecto", value=lambda: DIFF_NAMES.get(cfg.difficulty, cfg.difficulty),
                    change=cycler(list(reversed(DIFFS)), lambda: cfg.difficulty,
                                  lambda v: (setattr(cfg, "difficulty", v), cfg.save()))),
@@ -577,11 +778,19 @@ class Session(QObject):
                    change=cycler(list(SIDES), lambda: cfg.hud_side,
                                  lambda v: (setattr(cfg, "hud_side", v), cfg.save()))),
             Option("Teclas", lambda: self.menus.append(self.keys_menu())),
+            Option("Emparejar la guitarra de Wii", lambda: self.menus.append(self.pairing_menu()),
+                   value=lambda: "conectada" if self.inputs.guitar.connected else ""),
             Option("Letra", value=lambda: "Sí" if cfg.lyrics else "No",
                    change=cycler([False, True], lambda: cfg.lyrics,
                                  lambda v: (setattr(cfg, "lyrics", v), cfg.save()))),
             Option("Volver", self.menu_back),
         ], body="Elige una opción para cambiarla con el strum; se guarda sola.")
+
+    def library_short(self) -> str:
+        st = self.engine.state
+        if st.current:
+            return f"generando {round(st.done * 100)} %"
+        return f"{st.pending} en cola" if st.pending else ""
 
     def delay_menu(self) -> Menu:
         cfg, num = self.cfg, self.num
@@ -767,8 +976,10 @@ class Session(QObject):
                 return  # lo demás, ya con el juego a la vista
             elif ev.kind == "control" and ev.value in SONG_COMMANDS:
                 self.song_command(ev.value)
+        now = time.perf_counter()
+        self.tick_library(now)
         if self.follow:
-            self.watch_aimp(time.perf_counter())
+            self.watch_aimp(now)
 
     def song_command(self, cmd: str) -> None:
         """Botones 1, 2 y Home del Wiimote: siguiente, anterior y al azar. Siguiendo a AIMP, se le piden a AIMP
@@ -776,7 +987,7 @@ class Session(QObject):
         if self.follow:
             if cmd == "random":
                 songs = [e for albums in self.tree().values() for s in albums.values() for e in s
-                         if e.audio != self.aimp_file]
+                         if e.folder and e.audio != self.aimp_file]
                 if songs and self.aimp.play_file(random.choice(songs).audio):
                     self.toast("AIMP: canción al azar")
             else:
@@ -786,7 +997,7 @@ class Session(QObject):
         if cmd == "random":
             self.play_random()
             return
-        songs = [e for albums in self.tree().values() for s in albums.values() for e in s]
+        songs = [e for albums in self.tree().values() for s in albums.values() for e in s if e.folder]
         i = next((k for k, e in enumerate(songs) if e.sha == self.chart.audio_sha256), -1)
         if songs:
             self.choose(songs[(i + (1 if cmd == "next" else -1)) % len(songs)])
@@ -882,7 +1093,8 @@ class Session(QObject):
         if self.calib and self.calib.finished:
             self.finish_calibration()
         self.watch_aimp(now)
-        active = not self.waiting  # siguiendo a AIMP con una canción sin chart no se juega
+        self.tick_library(now)
+        active = not self.waiting and not self.blank  # siguiendo a AIMP sin chart (o sin canciones) no se juega
         seek = self.player.take_seek()
         if seek is not None and active and now > self.own_seek_until:  # salto hecho en AIMP
             self.results = ""
@@ -960,7 +1172,8 @@ class Session(QObject):
             "star": self.game.energy, "starOn": st.star, "starReady": self.game.star_ready,
             "phraseFlash": max(0.0, 1 - (now - self.phrase_t) / PHRASE_FLASH_S),
             "starFlash": max(0.0, 1 - (now - self.star_t) / 0.8),
-            "title": f"AIMP · {self.aimp_title}" if not active else f"{self.chart.artist} – {self.chart.title}",
+            "title": ("Music Hero" if self.blank else f"AIMP · {self.aimp_title}" if not active
+                      else f"{self.chart.artist} – {self.chart.title}"),
             "difficulty": DIFF_NAMES[self.difficulty],
             "autoplay": self.autoplay, "best": self.best_score, "partial": self.partial,
             "progress": max(0.0, min(1.0, t / max(1, self.chart.duration_ms))),
@@ -1130,6 +1343,8 @@ def make_tray(app: QApplication, session: Session) -> QSystemTrayIcon | None:
     tray = QSystemTrayIcon(tray_icon(), app)
     menu = QMenu()
     toggle = menu.addAction("Mostrar / ocultar", session.toggle_visible)
+    status = menu.addAction("Biblioteca")
+    status.setEnabled(False)  # solo informa
     menu.addSeparator()
     menu.addAction("Salir", app.quit)
 
@@ -1137,7 +1352,8 @@ def make_tray(app: QApplication, session: Session) -> QSystemTrayIcon | None:
         key = win32.combo_label(keymap(session.cfg.keys)["toggle"])
         toggle.setText(f"{'Ocultar' if session.view.isVisible() else 'Mostrar'} ({key})")
         song = f"AIMP: {session.aimp_title}" if session.follow else f"{session.chart.artist} – {session.chart.title}"
-        tray.setToolTip(f"Music Hero · {song}")
+        status.setText(f"Biblioteca: {session.library_line()}")
+        tray.setToolTip(f"Music Hero · {song}" if not session.blank else "Music Hero")
     menu.aboutToShow.connect(refresh)
     tray.setContextMenu(menu)
     tray.activated.connect(lambda reason: session.toggle_visible()
@@ -1210,11 +1426,12 @@ def main() -> int:
         chart = resolve(args.song)
     else:  # el selector, empezando por la última canción jugada
         entries = scan()
-        if not entries:
-            sys.exit("No hay canciones con chart: genéralas con uv run --project generator generate <carpeta>")
-        e = next((e for e in entries if e.sha == records.last), entries[0])
-        chart = Chart.load(Path(e.folder))
-        chart.audio_file = Path(e.audio)
+        if entries:
+            e = next((e for e in entries if e.sha == records.last), entries[0])
+            chart = Chart.load(Path(e.folder))
+            chart.audio_file = Path(e.audio)
+        else:  # recién instalado: la bienvenida (añadir la carpeta de música)
+            chart = blank_chart()
 
     QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.Direct3D11)
     fmt = QSurfaceFormat.defaultFormat()
@@ -1231,7 +1448,8 @@ def main() -> int:
     for e in inputs.errors:
         print("aviso:", e)
     aimp = Aimp()
-    session = bridge.session = Session(chart, cfg, args.difficulty, inputs, view, records, aimp)
+    engine = EngineClient()
+    session = bridge.session = Session(chart, cfg, args.difficulty, inputs, view, records, aimp, engine)
     session.set_autoplay(args.autoplay)
     session.tray = make_tray(app, session)
     if not args.song and not (aimp.connected() and aimp.state() == PLAYING and session.follow_aimp()):
@@ -1246,7 +1464,8 @@ def main() -> int:
     keepalive.start(200)
     keepalive.timeout.connect(lambda: None)
     topmost = QTimer()
-    topmost.timeout.connect(lambda: view.isVisible() and win32.bring_to_top(int(view.winId())))
+    topmost.timeout.connect(lambda: view.isVisible() and not session.dialog_open
+                            and win32.bring_to_top(int(view.winId())))
     topmost.start(500)
     idle = QTimer()  # oculto no se pinta: el atajo, salir y los botones del Wiimote se atienden aquí
     idle.timeout.connect(lambda: None if view.isVisible() else session.idle_inputs())
@@ -1262,7 +1481,8 @@ def main() -> int:
     if not args.hidden:
         view.show()
         win32.make_click_through(int(view.winId()))
-    playing = f"AIMP: {session.aimp_title}" if session.follow else f"{session.chart.artist} - {session.chart.title}"
+    playing = (f"AIMP: {session.aimp_title}" if session.follow else "sin canciones todavía" if session.blank
+               else f"{session.chart.artist} - {session.chart.title}")
     keys = {a: win32.combo_label(k) for a, k in keymap(cfg.keys).items()}
     print(f"{playing} ({DIFF_NAMES[session.difficulty]}). + / {keys['pause']}: menú, − / {keys['difficulty']}: "
           f"dificultad, {keys['toggle']} muestra/oculta, {keys['quit']} sale (o el icono junto al reloj).")
@@ -1270,6 +1490,7 @@ def main() -> int:
         return app.exec()
     finally:
         inputs.stop()
+        engine.stop()
         session.stop_calibration()
         session.player.close()
 

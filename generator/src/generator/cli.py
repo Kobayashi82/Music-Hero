@@ -149,16 +149,20 @@ def up_to_date(out: Path, sha: str, version: str, clonehero: bool = False) -> bo
 def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str = "cuda",
              human_chart: Path | None = None, model_path: Path | None = None, force: bool = False,
              max_nps: dict[str, float] | None = None, drop_stems: bool = False, tag: str = "",
-             out_dir: Path | None = None, use_library: bool = True, lyrics: bool = True) -> Path | None:
+             out_dir: Path | None = None, use_library: bool = True, lyrics: bool = True,
+             on_step=None) -> Path | None:
     """Genera la chart de una canción. Devuelve su carpeta, o None si ya estaba hecha (caché).
     use_library: sin human_chart, usar la chart humana de la biblioteca si está bajada.
-    lyrics: hacer también lyrics.json (generator.lyrics), también si la chart ya estaba y le falta."""
+    lyrics: hacer también lyrics.json (generator.lyrics), también si la chart ya estaba y le falta.
+    on_step(fracción 0..1, texto): al acabar cada etapa (el motor da el progreso y se pausa ahí)."""
     from .audio import song_info
 
     t0 = time.perf_counter()
 
-    def step(msg: str) -> None:
+    def step(msg: str, done: float | None = None) -> None:
         print(f"{tag}  [{time.perf_counter() - t0:5.1f} s] {msg}", flush=True)
+        if on_step is not None and done is not None:
+            on_step(done, msg)
 
     if human_chart is None and use_library:
         human_chart = library_human(audio)
@@ -168,6 +172,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     if not force and up_to_date(out, song.audio_sha256, version, clonehero):
         print(f"{tag}{audio.name}: ya hecha ({out.name})", flush=True)
         if lyrics:
+            step("letra", 0.8)
             _lyrics(out, device, drop_stems, step)
         return None
     print(f"{tag}{song.artist} - {song.title}  ({song.duration_ms / 1000:.0f} s)", flush=True)
@@ -182,8 +187,9 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     from .transcribe import transcribe
 
     out.mkdir(parents=True, exist_ok=True)
+    step("separando pistas", 0.02)
     stems = separate(audio, out / "stems", device)
-    step("pistas separadas (Demucs htdemucs_6s)")
+    step("pistas separadas (Demucs htdemucs_6s)", 0.4)
 
     beats, downbeats = detect_beats(audio, device)
     if len(set(beats)) < 4:
@@ -191,10 +197,10 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
         step("sin pulsos claros: rejilla fija de 120 BPM")
     tempo = TempoMap.from_beats(beats, downbeats)
     step(f"{len(beats)} pulsos, {len(downbeats)} compases, ~{tempo.bpm_at(len(beats) / 2):.0f} BPM, "
-         f"{tempo.beats_per_measure}/4")
+         f"{tempo.beats_per_measure}/4", 0.45)
 
     trans = {s: transcribe(stems[s], s) for s in MELODIC_STEMS}
-    step("notas: " + ", ".join(f"{s} {len(t.notes)}" for s, t in trans.items()))
+    step("notas: " + ", ".join(f"{s} {len(t.notes)}" for s, t in trans.items()), 0.55)
 
     feel = analyze(audio, stems["drums"])
     end_beat = tempo.ms_to_beat(song.duration_ms)
@@ -213,7 +219,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
         probs = predict(audio, model_path, device, guitar=stems["guitar"])
         difficulties = map_from_model(trans, tempo, sections, probs, params)
         notes = difficulties["expert"]
-        step(f"modelo {model_path.name}: " + ", ".join(f"{d} {len(n)}" for d, n in difficulties.items()))
+        step(f"modelo {model_path.name}: " + ", ".join(f"{d} {len(n)}" for d, n in difficulties.items()), 0.65)
 
     star_power: dict[str, list[tuple[int, int]]] = {}  # las de la chart humana; sin ellas, el juego las pone
     if human_chart is not None:
@@ -226,7 +232,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
                 f"desfase {offs.min() / 1000:+.2f}..{offs.max() / 1000:+.2f} s")
         doubtful = alignment.confidence < DOUBTFUL_HUMAN[0] and (offs.max() - offs.min()) / 1000 > DOUBTFUL_HUMAN[1]
         if (alignment.confidence < MIN_HUMAN_CONFIDENCE or doubtful) and len(difficulties) == 4:
-            step(f"chart humana descartada, no encaja con el audio: {sync}")
+            step(f"chart humana descartada, no encaja con el audio: {sync}", 0.72)
         else:
             shifted = {d: n for d, n in human.shift(hc.difficulties, alignment, tempo).items() if n}
             star_power = {d: ph for d, ph in human.shift_star_power(hc.star_power, alignment).items() if d in shifted}
@@ -234,7 +240,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
             difficulties = {d: shifted.get(d) or difficulties[d] for d in ("expert", "hard", "medium", "easy")
                             if d in shifted or d in difficulties}
             step(f"chart humana: {sync}: " + ", ".join(f"{d} {len(n)}" for d, n in shifted.items())
-                 + (f"; del modelo: {', '.join(filled)}" if filled else ""))
+                 + (f"; del modelo: {', '.join(filled)}" if filled else ""), 0.72)
             notes = difficulties.get("expert", notes)
 
     data = chart_json(song, tempo, difficulties, sections, version, star_power=star_power)
@@ -243,10 +249,11 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     if clonehero:
         write_clonehero(out / "clonehero", song, tempo, difficulties, sections, star_power=star_power)
     if lyrics:
+        step("chart lista; letra", 0.8)
         _lyrics(out, device, False, step)
     if drop_stems:
         shutil.rmtree(out / "stems", ignore_errors=True)
-    step(f"listo: {out}")
+    step(f"listo: {out}", 1.0)
     return out
 
 

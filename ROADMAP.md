@@ -189,15 +189,15 @@ Estado (18-10-2026): ✅ terminada (streaming descartado; la biblioteca y el pro
 
 Que otros usuarios lo usen sin tocar nada: los modelos sacan solos chart y letra, sin ajustes a mano.
 
-- [ ] Motor de generación como proceso aparte: cola persistente, progreso por líneas JSON en stdout, la app lo lanza y lo vigila (si se cae o se queda sin VRAM, el juego sigue).
-- [ ] Biblioteca: elegir carpetas, buscar la música (y vigilar las nuevas), generar chart y letra en segundo plano. Primero la canción que elige el usuario; el resto a baja prioridad y en pausa mientras se juega. Progreso (cola, %, canción actual) en Ajustes.
-- [ ] Ocultar la guitarra no cierra la app: queda en la bandeja (enlaza con la Fase 6).
+- [x] Motor de generación como proceso aparte (`generator/engine.py`, `uv run --project generator engine`): cola persistente en disco (pendientes, fallidas y la que está en curso; la que lo tumba dos veces pasa a fallidas), órdenes por stdin y avisos por líneas JSON en stdout (progreso por etapas: Demucs 40 %, pulsos, notas, modelo, chart 80 %, letra), pausa entre etapas. La app (`app/engine.py`) lo lanza solo cuando hay trabajo, sin ventana y con prioridad baja, lo vuelve a lanzar si se cae (5 s, 30 s, 2 min) y lo cierra tras 5 min sin trabajo; su salida va a out/engine.log. Ojo, Windows: con un hilo bloqueado leyendo la tubería de stdin, cargar la DLL de OpenBLAS (scipy) se colgaba; se lee con PeekNamedPipe sin dejar lecturas pendientes.
+- [x] Biblioteca (Ajustes → Biblioteca): añadir carpetas (diálogo de Windows; el juego se aparta mientras) y quitarlas, «Generar en segundo plano» y reintentar las fallidas; se recorren en un hilo al empezar y cada 10 min. Lo que no tiene chart va a la cola y sale en el selector con su estado (sin chart, en cola, generando N %, falló); al elegir una, va la primera y se juega en cuanto está. El motor se pausa mientras se juega. Estado en Ajustes y en el icono de la bandeja. Recién instalado (sin canciones) sale una bienvenida: añadir la carpeta de música, elegir canción, emparejar la guitarra; con la primera chart lista se abre el selector. Probado como instalación nueva (`MUSICHERO_HOME` y `APPDATA` en otra carpeta): una canción de 94 s, chart y letra en ~20 s y el selector se abre solo.
+- [x] Ocultar la guitarra no cierra la app: queda en la bandeja (hecho en la fase 6: «Ocultar» en los menús, Salir desde el icono).
 - [ ] App como instalador: PyInstaller en modo carpeta (no onefile: arranque lento y falsos positivos de antivirus) + Inno Setup, ~200 MB, sin torch.
 - [ ] El motor no va en el instalador: se descarga la primera vez que se añade una carpeta. La app lleva `uv.exe` y el lockfile del generador y lo instala en `%LOCALAPPDATA%/MusicHero/engine`, con torch CUDA o CPU según la GPU que encuentre.
 - [ ] Modelos descargados al primer uso a la misma carpeta (Demucs, Beat This!, Whisper, OnsetNet), con progreso y reanudación.
 - [ ] OnsetNet en Hugging Face con model card. Licencia no comercial por prudencia (entrenado con charts de la comunidad); nunca subir charts ni audio. Antes de presentarlo como mejor, medirlo con el banco de la Fase 5 frente a Fretformer/Autochart.
 - [ ] Charts de Encore descargadas por la app: revisar sus condiciones antes de activarlo para otros usuarios.
-- [ ] Emparejar la guitarra de Wii desde la propia app (`pair_wiimote.py`).
+- [x] Emparejar la guitarra de Wii desde la propia app: Ajustes (y la bienvenida) → «Emparejar la guitarra de Wii», en un hilo con los avisos en el menú (`app/pairing.py`; `tools/pair_wiimote.py` lo usa). Sin probar con el mando todavía.
 - [ ] Sin NVIDIA: en CPU son varios minutos por canción. Más adelante, OnsetNet y Demucs a ONNX con DirectML (AMD e Intel) y faster-whisper para la letra; si sale bien, el motor deja de necesitar torch y pesa mucho menos.
 - [ ] Ejecutable sin firmar: SmartScreen avisará; valorar firma de código.
 

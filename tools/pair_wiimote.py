@@ -1,157 +1,24 @@
 """Empareja un Wiimote con Windows sin escribir PIN (Windows 11 lo pide y no se puede teclear).
 
-El PIN de un Wiimote emparejado con el botón rojo de sync es la dirección Bluetooth del PC, byte a byte
-(6 bytes, no son letras): se le pasa a Windows por la API, como hacen Dolphin y WiitarThing.
+La lógica está en app/src/app/pairing.py (la usa también el juego: Ajustes → «Emparejar la guitarra de Wii»).
 
 Uso:
     uv run --project app python tools/pair_wiimote.py
 
 1. Arranca el script y pulsa el botón rojo de sync del Wiimote (bajo la tapa de las pilas).
 2. Si deja de parpadear antes de que salga, vuelve a pulsarlo: el script sigue buscando 2 minutos.
-Si ya había un "Nintendo RVL-CNT-01" a medias (pedía PIN), lo borra y lo empareja de nuevo.
 """
 
-import ctypes
 import sys
-import time
-from ctypes import wintypes
+from pathlib import Path
 
-bt = ctypes.WinDLL("bthprops.cpl")  # BluetoothApis.dll no tiene BluetoothAuthenticateDevice
-
-
-class BLUETOOTH_ADDRESS(ctypes.Union):
-    _fields_ = [("ullLong", ctypes.c_ulonglong), ("rgBytes", ctypes.c_ubyte * 6)]
-
-
-class BLUETOOTH_FIND_RADIO_PARAMS(ctypes.Structure):
-    _fields_ = [("dwSize", wintypes.DWORD)]
-
-
-class BLUETOOTH_RADIO_INFO(ctypes.Structure):
-    _fields_ = [("dwSize", wintypes.DWORD), ("address", BLUETOOTH_ADDRESS), ("szName", wintypes.WCHAR * 248),
-                ("ulClassofDevice", wintypes.ULONG), ("lmpSubversion", wintypes.USHORT),
-                ("manufacturer", wintypes.USHORT)]
-
-
-class SYSTEMTIME(ctypes.Structure):
-    _fields_ = [(n, wintypes.WORD) for n in ("wYear", "wMonth", "wDayOfWeek", "wDay", "wHour", "wMinute",
-                                              "wSecond", "wMilliseconds")]
-
-
-class BLUETOOTH_DEVICE_INFO(ctypes.Structure):
-    _fields_ = [("dwSize", wintypes.DWORD), ("Address", BLUETOOTH_ADDRESS), ("ulClassofDevice", wintypes.ULONG),
-                ("fConnected", wintypes.BOOL), ("fRemembered", wintypes.BOOL), ("fAuthenticated", wintypes.BOOL),
-                ("stLastSeen", SYSTEMTIME), ("stLastUsed", SYSTEMTIME), ("szName", wintypes.WCHAR * 248)]
-
-
-class BLUETOOTH_DEVICE_SEARCH_PARAMS(ctypes.Structure):
-    _fields_ = [("dwSize", wintypes.DWORD), ("fReturnAuthenticated", wintypes.BOOL),
-                ("fReturnRemembered", wintypes.BOOL), ("fReturnUnknown", wintypes.BOOL),
-                ("fReturnConnected", wintypes.BOOL), ("fIssueInquiry", wintypes.BOOL),
-                ("cTimeoutMultiplier", ctypes.c_ubyte), ("hRadio", wintypes.HANDLE)]
-
-
-class GUID(ctypes.Structure):
-    _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD),
-                ("Data4", ctypes.c_ubyte * 8)]
-
-
-HID_SERVICE = GUID(0x00001124, 0x0000, 0x1000, (ctypes.c_ubyte * 8)(0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB))
-BLUETOOTH_SERVICE_ENABLE = 1
-
-bt.BluetoothFindFirstRadio.restype = wintypes.HANDLE
-bt.BluetoothFindFirstRadio.argtypes = [ctypes.POINTER(BLUETOOTH_FIND_RADIO_PARAMS), ctypes.POINTER(wintypes.HANDLE)]
-bt.BluetoothFindRadioClose.argtypes = [wintypes.HANDLE]
-bt.BluetoothGetRadioInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(BLUETOOTH_RADIO_INFO)]
-bt.BluetoothFindFirstDevice.restype = wintypes.HANDLE
-bt.BluetoothFindFirstDevice.argtypes = [ctypes.POINTER(BLUETOOTH_DEVICE_SEARCH_PARAMS), ctypes.POINTER(BLUETOOTH_DEVICE_INFO)]
-bt.BluetoothFindNextDevice.argtypes = [wintypes.HANDLE, ctypes.POINTER(BLUETOOTH_DEVICE_INFO)]
-bt.BluetoothFindDeviceClose.argtypes = [wintypes.HANDLE]
-bt.BluetoothRemoveDevice.argtypes = [ctypes.POINTER(BLUETOOTH_ADDRESS)]
-bt.BluetoothAuthenticateDevice.argtypes = [wintypes.HWND, wintypes.HANDLE, ctypes.POINTER(BLUETOOTH_DEVICE_INFO),
-                                           wintypes.LPWSTR, wintypes.ULONG]
-bt.BluetoothSetServiceState.argtypes = [wintypes.HANDLE, ctypes.POINTER(BLUETOOTH_DEVICE_INFO), ctypes.POINTER(GUID),
-                                        wintypes.DWORD]
-
-
-def addr_str(a: BLUETOOTH_ADDRESS) -> str:
-    return ":".join(f"{b:02X}" for b in reversed(a.rgBytes))
-
-
-def find_radio() -> tuple[wintypes.HANDLE, BLUETOOTH_RADIO_INFO]:
-    params = BLUETOOTH_FIND_RADIO_PARAMS(ctypes.sizeof(BLUETOOTH_FIND_RADIO_PARAMS))
-    radio = wintypes.HANDLE()
-    h = bt.BluetoothFindFirstRadio(ctypes.byref(params), ctypes.byref(radio))
-    if not h:
-        sys.exit("No hay adaptador Bluetooth (o está apagado).")
-    bt.BluetoothFindRadioClose(h)
-    info = BLUETOOTH_RADIO_INFO()
-    info.dwSize = ctypes.sizeof(BLUETOOTH_RADIO_INFO)
-    if bt.BluetoothGetRadioInfo(radio, ctypes.byref(info)) != 0:
-        sys.exit("No se pudo leer el adaptador Bluetooth.")
-    return radio, info
-
-
-def devices(radio, inquiry: bool) -> list[BLUETOOTH_DEVICE_INFO]:
-    sp = BLUETOOTH_DEVICE_SEARCH_PARAMS(ctypes.sizeof(BLUETOOTH_DEVICE_SEARCH_PARAMS), True, True, True, True,
-                                        inquiry, 2 if inquiry else 0, radio)  # 2 x 1,28 s de búsqueda
-    out = []
-    info = BLUETOOTH_DEVICE_INFO()
-    info.dwSize = ctypes.sizeof(BLUETOOTH_DEVICE_INFO)
-    h = bt.BluetoothFindFirstDevice(ctypes.byref(sp), ctypes.byref(info))
-    if not h:
-        return out
-    while True:
-        out.append(info)
-        info = BLUETOOTH_DEVICE_INFO()
-        info.dwSize = ctypes.sizeof(BLUETOOTH_DEVICE_INFO)
-        if not bt.BluetoothFindNextDevice(h, ctypes.byref(info)):
-            break
-    bt.BluetoothFindDeviceClose(h)
-    return out
-
-
-def is_wiimote(d: BLUETOOTH_DEVICE_INFO) -> bool:
-    return d.szName.startswith("Nintendo RVL-")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app" / "src"))
+from app.pairing import pair  # noqa: E402
 
 
 def main() -> int:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    radio, info = find_radio()
-    print(f"Adaptador: {info.szName or '?'} ({addr_str(info.address)})")
-
-    for d in devices(radio, inquiry=False):  # restos de intentos con PIN: impiden volver a encontrarlo
-        if is_wiimote(d) and not d.fConnected:
-            print(f"Borrando el emparejamiento anterior de {d.szName} ({addr_str(d.Address)})")
-            bt.BluetoothRemoveDevice(ctypes.byref(d.Address))
-
-    # PIN = dirección del PC, cada byte en un WCHAR (orden de rgBytes, el byte menos significativo primero)
-    pin = ctypes.create_unicode_buffer("".join(chr(b) for b in info.address.rgBytes), 7)
-    print("Pulsa el botón rojo de sync del Wiimote (bajo la tapa de las pilas). Buscando hasta 2 minutos...")
-    t0 = time.time()
-    while time.time() - t0 < 120:
-        for d in devices(radio, inquiry=True):
-            if not is_wiimote(d):
-                continue
-            if d.fConnected and d.fAuthenticated:
-                print(f"{d.szName} ({addr_str(d.Address)}) ya está emparejado y conectado.")
-                return 0
-            if d.fRemembered:
-                bt.BluetoothRemoveDevice(ctypes.byref(d.Address))
-            print(f"Encontrado {d.szName} ({addr_str(d.Address)}), emparejando...")
-            r = bt.BluetoothAuthenticateDevice(None, radio, ctypes.byref(d), pin, 6)
-            if r != 0:
-                print(f"  falló la autenticación (error {r}); vuelve a pulsar el botón rojo")
-                continue
-            r = bt.BluetoothSetServiceState(radio, ctypes.byref(d), ctypes.byref(HID_SERVICE), BLUETOOTH_SERVICE_ENABLE)
-            if r != 0:
-                print(f"  emparejado, pero no se pudo activar como mando (error {r})")
-                continue
-            print("¡Emparejado! Windows tarda unos segundos en instalarlo; luego prueba tools/poc_guitar.py.")
-            return 0
-        print(f"  ... {int(time.time() - t0)} s (si dejó de parpadear, pulsa otra vez el botón rojo)", flush=True)
-    print("No se encontró ningún Wiimote. ¿Bluetooth activado? ¿Pilas?")
-    return 1
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+    return 0 if pair(print) else 1
 
 
 if __name__ == "__main__":

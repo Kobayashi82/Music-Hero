@@ -113,3 +113,34 @@ def test_menu_de_busqueda():
     m.sel = 1
     m.select()  # «Borrar letra»
     assert m.query == "" and "Buscar:" in m.body
+
+
+def test_carpetas_de_musica_y_las_que_no_tienen_chart(tmp_path):
+    from app.library import MusicWatcher, find_music, in_dirs, pending_entries, without_chart
+
+    charts = tmp_path / "charts"
+    make_song(tmp_path, charts, "Queen/Greatest Hits II/Queen - Hammer to Fall.mp3", "Hammer to Fall", "Queen")
+    make_song(tmp_path, charts, "Avril Lavigne/Let Go/Losing Grip.mp3", "Losing Grip", "Avril")
+    nueva = tmp_path / "Musicas" / "Queen" / "Greatest Hits II" / "02 - Nueva.flac"
+    nueva.write_bytes(b"")
+    (tmp_path / "Musicas" / "Queen" / "portada.jpg").write_bytes(b"")
+    music_dir = str(tmp_path / "Musicas")
+    music = find_music([music_dir, music_dir])  # repetida: sin duplicados
+    assert len(music) == 3 and all(m.endswith((".mp3", ".flac")) for m in music)
+    missing = without_chart(music, scan(charts, tmp_path / "library.json"))
+    assert missing == [str(nueva)]
+    assert in_dirs(str(nueva), [music_dir]) and not in_dirs(str(nueva), [str(tmp_path / "Otra")])
+    assert not in_dirs(music_dir + "2/x.mp3", [music_dir])  # «Musicas2» no está dentro de «Musicas»
+    tree = group(scan(charts, tmp_path / "library.json") + pending_entries(missing))
+    songs = tree["Queen"]["Greatest Hits II"]
+    assert [(e.title, bool(e.folder)) for e in songs] == [("Nueva", False), ("Hammer to Fall", True)]
+
+    w = MusicWatcher(interval_s=3600)
+    w.set_dirs([music_dir])
+    import time
+    for _ in range(100):
+        found = w.take()
+        if found is not None:
+            break
+        time.sleep(0.02)
+    assert found == music

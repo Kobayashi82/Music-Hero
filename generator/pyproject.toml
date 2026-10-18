@@ -36,6 +36,7 @@ explicit = true
 [project.scripts]
 generate = "generator.cli:main"
 lyrics = "generator.lyrics:main"
+engine = "generator.engine:main"
 
 [build-system]
 requires = ["hatchling"]
