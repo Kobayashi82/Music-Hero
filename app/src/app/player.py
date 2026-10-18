@@ -24,6 +24,24 @@ def wasapi_output() -> int | None:
     return None
 
 
+def read_audio(path: Path) -> tuple[np.ndarray, int]:
+    """Lee el audio por bloques; si el final está dañado (MP3 truncado), se queda con lo que se pudo leer."""
+    blocks = []
+    with sf.SoundFile(str(path)) as f:
+        sr = f.samplerate
+        while True:
+            try:
+                block = f.read(sr // 10, dtype="float32", always_2d=True)  # bloques cortos: se pierde poco
+            except sf.LibsndfileError:
+                if not blocks:
+                    raise
+                break
+            if not len(block):
+                break
+            blocks.append(block)
+    return np.concatenate(blocks), sr
+
+
 class Player:
     def __init__(self, source: Path | tuple[np.ndarray, int], offset_ms: float = 0.0, lead_in_ms: float = 2000.0,
                  volume: float = 1.0):
@@ -32,7 +50,7 @@ class Player:
             audio, self.sr = source
             audio = audio.reshape(len(audio), -1)
         else:
-            audio, self.sr = sf.read(str(source), dtype="float32", always_2d=True)
+            audio, self.sr = read_audio(source)
         self.audio = audio[:, :2] if audio.shape[1] >= 2 else np.repeat(audio, 2, axis=1)
         self.duration_ms = len(self.audio) / self.sr * 1000
         self.offset_ms = offset_ms
