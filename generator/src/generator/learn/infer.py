@@ -50,18 +50,27 @@ class ModelNote:
 
 def load(path: Path, device: str = "cuda") -> tuple[OnsetNet, dict]:
     ck = torch.load(path, map_location=device)
-    model = OnsetNet(n_extra=ck.get("n_extra", 2), frets=ck.get("frets", False)).to(device)  # v1 sin estilo
+    model = OnsetNet(n_extra=ck.get("n_extra", 2), frets=ck.get("frets", False),  # v1 sin estilo
+                     guitar=ck.get("guitar", False)).to(device)
     model.load_state_dict(ck["model"])
     model.eval()
     return model, ck["thresholds"]
 
 
-def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 1.0) -> dict[str, list[ModelNote]]:
-    """style: 1 = como Harmonix (sobria), 0 = como la comunidad (más cargada); los modelos v1 lo ignoran."""
+def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 1.0,
+            guitar: Path | None = None) -> dict[str, list[ModelNote]]:
+    """style: 1 = como Harmonix (sobria), 0 = como la comunidad (más cargada); los modelos v1 lo ignoran.
+    guitar: pista de guitarra de Demucs (stems/guitar.flac), la necesitan los modelos con guitarra (v5+)."""
     model, thresholds = load(model_path, device)
     y = load_mono(audio, SR)
     peak = np.abs(y).max()
-    feats = features(y / peak if peak > 0 else y, device)
+    scale = 1 / peak if peak > 0 else 1.0
+    g = None
+    if model.guitar:
+        if guitar is None:
+            raise ValueError(f"{model_path.name} necesita la pista de guitarra (stems/guitar.flac)")
+        g = load_mono(guitar, SR) * scale  # con la escala de la mezcla, como al entrenar
+    feats = features(y * scale, device, g)
     probs = predict_song(model, feats, device, style)
     out = {}
     seconds = len(probs) / FPS

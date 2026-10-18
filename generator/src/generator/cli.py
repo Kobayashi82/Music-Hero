@@ -210,7 +210,8 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
         from .learn.infer import predict
         from .mapping import map_from_model
 
-        difficulties = map_from_model(trans, tempo, sections, predict(audio, model_path, device), params)
+        probs = predict(audio, model_path, device, guitar=stems["guitar"])
+        difficulties = map_from_model(trans, tempo, sections, probs, params)
         notes = difficulties["expert"]
         step(f"modelo {model_path.name}: " + ", ".join(f"{d} {len(n)}" for d, n in difficulties.items()))
 

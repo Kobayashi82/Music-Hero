@@ -2,6 +2,7 @@
 
 Uso:
     uv run --project generator python -m generator.learn.train out/dataset/feat --out models/onset.pt
+    uv run --project generator python -m generator.learn.train out/dataset/feat5 --guitar --frets --out models/onset_v5.pt
 
 Validación: 5 % de las canciones (fijo por hash). Métrica: F1 de inicios de nota
 con ±50 ms, por dificultad, eligiendo el umbral que mejor funciona en validación.
@@ -174,7 +175,7 @@ def predict_song(model: OnsetNet, feats: np.ndarray, device: str, style: float =
     """Probabilidades (T, 12) para una canción entera, por trozos solapados; con botones, (T, 12 + 4 x 32):
     detrás, la probabilidad de cada combinación de botones por dificultad (suma 1, la 0 nunca)."""
     model.eval()
-    if model.n_extra > feats.shape[1] - N_MELS:
+    if feats.shape[1] < model.n_in:  # falta la columna de estilo
         feats = with_style(np.asarray(feats, dtype=np.float32), style)
     t = len(feats)
     out = np.zeros((t, model.n_out), np.float32)
@@ -281,6 +282,8 @@ def main() -> int:
     ap.add_argument("--eval-every", type=int, default=2000)
     ap.add_argument("--frets", action="store_true", help="aprender también los botones de cada nota")
     ap.add_argument("--init", type=Path, help="empezar desde los pesos de otro modelo (p. ej. models/onset_v3.pt)")
+    ap.add_argument("--guitar", action="store_true",
+                    help="entrada con la pista de guitarra y su CQT (datos de learn.data --guitar)")
     args = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
@@ -299,7 +302,7 @@ def main() -> int:
     print(f"{len(train)} canciones de entrenamiento ({sum(s['style'] for s in train):.0f} de Harmonix), "
           f"{len(val)} de validación ({len(exclude)} de la biblioteca excluidas)")
     device = "cuda"
-    model = OnsetNet(frets=args.frets).to(device)
+    model = OnsetNet(frets=args.frets, guitar=args.guitar).to(device)
     if args.init:
         init_from(model, args.init)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
@@ -351,6 +354,7 @@ def main() -> int:
             if mean > best_f1:
                 best_f1 = mean
                 torch.save({"model": model.state_dict(), "n_extra": model.n_extra, "frets": model.frets,
+                            "guitar": model.guitar,
                             "thresholds": {d: r["threshold"] for d, r in res.items()},
                             "val": res, "step": step}, args.out)
                 print(f"   guardado (puntuación {mean:.3f}) -> {args.out}")
