@@ -64,39 +64,16 @@ Item {
             PathLine { x: root.xAt(-0.5, 1); y: root.horizonY }
         }
     }
-    Repeater {  // luz del carril pulsado: tres capas (ancha y tenue -> estrecha y clara) para bordes suaves
+    Repeater {  // luz del carril pulsado: un haz suave (sprite beam/, más estrecho arriba como el carril)
         model: 5
-        Item {
-            id: beam
-            anchors.fill: parent
-            readonly property int lane: index
-            readonly property color col: root.colors[index]
+        Image {
+            readonly property real beamTop: root.yAt(root.glowU)
+            source: root.sprite("beam/" + index); smooth: true
             opacity: root.f.held[index] ? 1 : 0
             visible: opacity > 0
             Behavior on opacity { NumberAnimation { duration: 70 } }
-            Repeater {
-                model: [[0.5, 1.0, 0.2], [0.32, 0.8, 0.26], [0.13, 0.55, 0.5]]  // medio ancho, alto, alpha
-                Shape {
-                    preferredRendererType: Shape.CurveRenderer
-                    id: layer
-                    anchors.fill: parent
-                    readonly property real hw: modelData[0]
-                    readonly property real topU: root.glowU * modelData[1]
-                    ShapePath {
-                        strokeWidth: 0; strokeColor: "transparent"
-                        fillGradient: LinearGradient {
-                            y1: root.yAt(layer.topU); y2: root.strikeY
-                            GradientStop { position: 0; color: "transparent" }
-                            GradientStop { position: 0.7; color: Qt.alpha(Qt.lighter(beam.col, 1.0 + index * 0.25), modelData[2] * 0.6) }
-                            GradientStop { position: 1; color: Qt.alpha(Qt.lighter(beam.col, 1.0 + index * 0.25), modelData[2]) }
-                        }
-                        startX: root.xAt(beam.lane - layer.hw, layer.topU); startY: root.yAt(layer.topU)
-                        PathLine { x: root.xAt(beam.lane + layer.hw, layer.topU); y: root.yAt(layer.topU) }
-                        PathLine { x: root.xAt(beam.lane + layer.hw, 0); y: root.strikeY }
-                        PathLine { x: root.xAt(beam.lane - layer.hw, 0); y: root.strikeY }
-                    }
-                }
-            }
+            width: root.laneW * 1.15; height: root.strikeY - beamTop
+            x: root.xAt(index, 0) - width / 2; y: beamTop
         }
     }
     Shape {  // al fallar: la parte de abajo de la autopista se enciende en rojo y se apaga

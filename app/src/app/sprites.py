@@ -7,6 +7,7 @@ Ids:
     fret/<carril>/<up|down>            botón de la línea de golpeo (mismo lienzo y cara que las notas)
     flame/<carril>/<0..FLAME_FRAMES-1> acierto: fuego suave, haz de luz y chispas (base abajo en el centro)
     glow/<carril|white>                halo suave redondo (GLOW x GLOW)
+    beam/<carril>                      luz del carril pulsado (BEAM_W x BEAM_H, la base abajo)
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ FACE = QRectF(38, 34, 180, 82)  # elipse de la cara dentro del lienzo (Highway.q
 DEPTH = 16  # grosor de la pieza
 FLAME_W, FLAME_H, FLAME_BASE, FLAME_FRAMES = 160, 320, 34, 6
 GLOW = 256
+BEAM_W, BEAM_H = 128, 256
+BEAM_TOP_WIDTH = 0.8  # arriba el haz es así de ancho respecto a abajo (la perspectiva de la autopista)
 SS = 2  # superresolución
 
 
@@ -213,7 +216,6 @@ def draw_gem(lane: int, kind: str) -> QImage:
     miss = kind == "miss"
     col = QColor("#5a5e68") if miss else QColor(COLORS[lane])
     img, p = _img(GEM_W, GEM_H)
-    _contact_shadow(p, FACE, DEPTH)
     if not miss:
         _halo(p, _body(FACE, DEPTH), _shade(col, 1.3) if kind == "hopo" else col, 0.55 if kind == "hopo" else 0.35)
     if kind == "hopo":
@@ -350,6 +352,26 @@ def draw_glow(name: str) -> QImage:
     return img
 
 
+def draw_beam(lane: int) -> QImage:
+    """Haz de luz del carril pulsado, calculado píxel a píxel: caída gaussiana a los lados y hacia arriba,
+    núcleo casi blanco, y más estrecho arriba como el carril en perspectiva."""
+    col = QColor(COLORS[lane])
+    x = np.linspace(-1, 1, BEAM_W)[None, :]
+    t = np.linspace(0, 1, BEAM_H)[:, None]  # 0 arriba, 1 abajo (la línea de golpeo)
+    wf = BEAM_TOP_WIDTH + (1 - BEAM_TOP_WIDTH) * t
+    core = np.exp(-(x / (0.14 * wf)) ** 2)
+    wide = np.exp(-(x / (0.4 * wf)) ** 2)
+    vert = t ** 1.7
+    base = np.exp(-((1 - t) / 0.06) ** 2)  # se aviva justo encima del botón
+    a = np.clip((0.42 * wide + 0.5 * core) * vert + 0.35 * base * wide, 0, 1)
+    white = np.clip(core * vert * 0.75, 0, 1)
+    rgb = np.array([col.redF(), col.greenF(), col.blueF()])[None, None, :]
+    rgb = rgb * (1 - white[..., None]) + white[..., None]
+    arr = np.dstack([rgb * a[..., None], a]) * 255  # premultiplicado
+    arr = np.ascontiguousarray(arr.astype(np.uint8))
+    return QImage(arr.data, BEAM_W, BEAM_H, BEAM_W * 4, QImage.Format.Format_RGBA8888_Premultiplied).copy()
+
+
 def draw(sprite_id: str) -> QImage:
     parts = sprite_id.split("/")
     kind = parts[0]
@@ -361,6 +383,8 @@ def draw(sprite_id: str) -> QImage:
         return draw_flame(int(parts[1]), int(parts[2]) % FLAME_FRAMES)
     if kind == "glow":
         return draw_glow(parts[1])
+    if kind == "beam":
+        return draw_beam(int(parts[1]))
     raise KeyError(sprite_id)
 
 
