@@ -138,6 +138,8 @@ Primero con audio reproducido por la propia app: así la sincronía es exacta y 
 - [x] Opacidad, tamaño y posición del overlay configurables.
 - [x] Menú con la guitarra: + abre la pausa (continuar, dificultad, reiniciar, ajustes, calibrar, salir), − cambia de dificultad sin parar la canción; strum mueve, verde elige, rojo vuelve. Lo mismo con teclado (Espacio, Tab, flechas, Intro, Retroceso).
 - [x] La guitarra se reconecta sola si se apaga o se enciende con el juego abierto.
+- [x] Récords y estadísticas por canción y dificultad (`%APPDATA%/MusicHero/stats.json`, por hash del audio): mejor puntuación con su precisión, racha y fecha, partidas jugadas, mejor precisión, mejor racha y las últimas 20 partidas. Se ven en la pausa, en el marcador (dorado al superarlo, con aviso) y al acabar. No cuentan las partidas con el modo automático ni las empezadas a mitad (cambio de dificultad jugando).
+- [x] Dificultad guardada por canción; si una canción no tiene, la de por defecto (Ajustes).
 - [ ] Selector de canciones en el overlay: artista → álbum → canción, con las etiquetas del audio (las que tienen chart).
 - [ ] Letra debajo de la autopista. Se saca al generar: la de la chart humana si la trae; si no, la sincronizada de LRCLIB (artista, título y duración), y Whisper sobre la pista de voz para ajustar cada palabra. Whisper solo, sin letra conocida, como último recurso (con voces susurradas se inventa frases). Versión nueva del esquema de chart.
 

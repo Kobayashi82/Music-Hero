@@ -13,7 +13,7 @@ Item {
                        score: 0, streak: 0, mult: 1, accuracy: 1, title: "", difficulty: "", message: "",
                        progress: 0, countdown: 0, menu: ({}), menuHint: "", calib: ({}), toast: "",
                        opacity: 0.85, missFlash: 0, missLane: [0, 0, 0, 0, 0], burn: [false, false, false, false, false],
-                       time: 0, autoplay: false, hwWidth: 560 })
+                       time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560 })
     readonly property var colors: ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
     readonly property var multColors: ["white", "#ffdc00", "#2ecc40", "#c86cff"]
     readonly property real farScale: 0.38
@@ -268,7 +268,7 @@ Item {
     Rectangle {
         x: root.xAt(4.5, 0) + 18; y: root.strikeY - height + 30
         width: score.implicitWidth + 32; height: score.implicitHeight + 24; radius: 10
-        color: "#b0101020"; border.color: "#40ffffff"
+        color: "#e6101020"; border.color: "#40ffffff"
         Column {
             id: score
             x: 16; y: 12; spacing: 2
@@ -291,8 +291,14 @@ Item {
                     }
                 }
             }
-            Text { text: root.f.streak > 0 ? root.f.streak + " seguidas" : " "; color: "white"; font.pixelSize: 18 }
+            Text { text: root.f.streak > 1 ? root.f.streak + " seguidas" : root.f.streak === 1 ? "1 seguida" : " "; color: "white"; font.pixelSize: 18 }
             Text { text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty; color: "#ccffffff"; font.pixelSize: 16 }
+            Text {  // récord de la canción en esta dificultad; dorado al superarlo
+                readonly property bool beaten: root.f.best > 0 && root.f.score > root.f.best && !root.f.partial
+                visible: root.f.best > 0
+                text: beaten ? "¡Récord! (" + root.fmt(root.f.best) + ")" : "Récord " + root.fmt(root.f.best)
+                color: beaten ? "#ffd23c" : "#99ffffff"; font.pixelSize: 15; font.bold: beaten
+            }
             Text { visible: root.f.autoplay; text: "Automático"; color: "#ffdc00"; font.pixelSize: 16; font.bold: true }
         }
     }

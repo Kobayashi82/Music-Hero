@@ -29,6 +29,7 @@ from .gameplay import HIT, MISSED, SKIPPED, Game
 from .inputs import Inputs
 from .menu import Menu, Option, cycler, stepper
 from .player import Player
+from .records import Play, Records
 from .sprites import SpriteProvider
 
 QML = Path(__file__).with_name("qml") / "Highway.qml"
@@ -45,9 +46,11 @@ POSITIONS = {"left": "Izquierda", "center": "Centro", "right": "Derecha"}
 
 
 class Session(QObject):
-    def __init__(self, chart: Chart, cfg: Config, difficulty: str, inputs: Inputs, view: QQuickView):
+    def __init__(self, chart: Chart, cfg: Config, difficulty: str, inputs: Inputs, view: QQuickView,
+                 records: Records | None = None):
         super().__init__()
         self.chart, self.cfg, self.inputs, self.view = chart, cfg, inputs, view
+        self.records = records or Records()
         self.difficulty = difficulty if difficulty in chart.difficulties else next(iter(chart.difficulties))
         self.player = Player(chart.audio_file, cfg.audio_offset_ms, LEAD_IN_MS, cfg.volume)
         self.held = [False] * 5
@@ -64,6 +67,8 @@ class Session(QObject):
         self.guitar_connected: bool | None = None
         self.message = "; ".join(inputs.errors)
         self.autoplay = False
+        self.partial = False  # la partida no cuenta para récords (automático o empezada a mitad)
+        self.record_toast = False  # ya se avisó de que se ha superado el récord en esta partida
         self.beats = chart.beats
         self.beat_times = [b[0] for b in self.beats]
         self.new_game()
@@ -77,6 +82,10 @@ class Session(QObject):
         self.game.held |= {i for i, h in enumerate(self.held) if h}
         self.times = [n.time_ms for n in notes]
         self.max_sustain = max((n.sustain_ms for n in notes), default=0)
+        self.partial = self.autoplay
+        self.record_toast = False
+        best = self.records.best(self.chart.audio_sha256, self.difficulty)
+        self.best_score = best.score if best else 0
 
     def restart(self) -> None:
         self.menus.clear()
@@ -100,8 +109,8 @@ class Session(QObject):
     def set_difficulty(self, d: str) -> None:
         if d == self.difficulty or d not in self.chart.difficulties:
             return
-        self.difficulty = self.cfg.difficulty = d
-        self.cfg.save()
+        self.difficulty = d
+        self.records.set_difficulty(self.chart.audio_sha256, d, self.chart.title, self.chart.artist)
         self.toast(f"Dificultad: {DIFF_NAMES[d]}")
         if self.results:
             return  # se juega al elegir "Otra vez"
@@ -109,6 +118,7 @@ class Session(QObject):
         self.new_game()
         if t > 0:
             self.game.skip_to(t + (SWITCH_AHEAD_MS if self.player.playing else 0))
+            self.partial = True  # empezada a mitad: no cuenta para récords
 
     def cycle_difficulty(self) -> None:
         """Tab / −: a la siguiente más fácil, y de Fácil vuelve a Experto."""
@@ -135,9 +145,25 @@ class Session(QObject):
         return Option("Dificultad", value=lambda: DIFF_NAMES[self.difficulty],
                       change=cycler(avail, lambda: self.difficulty, self.set_difficulty))
 
+    def set_autoplay(self, on: bool) -> None:
+        self.autoplay = on
+        if on:
+            self.partial = True  # las partidas con el modo automático no cuentan para récords
+
     def autoplay_option(self) -> Option:
         return Option("Modo automático", value=lambda: "Sí" if self.autoplay else "No",
-                      change=cycler([False, True], lambda: self.autoplay, lambda v: setattr(self, "autoplay", v)))
+                      change=cycler([False, True], lambda: self.autoplay, self.set_autoplay))
+
+    def record_line(self) -> str:
+        sha = self.chart.audio_sha256
+        best = self.records.best(sha, self.difficulty)
+        name = DIFF_NAMES[self.difficulty]
+        if best is None:
+            return f"Sin récord en {name} todavía"
+        st = self.records.stats(sha, self.difficulty)
+        line = (f"Récord en {name}: <b>{fmt_int(best.score)}</b> · {best.accuracy:.0%} · racha {best.best_streak}"
+                f"{' · sin fallos' if best.full_combo else ''}")
+        return line + f"<br>{st.get('plays', 0)} partidas · el {fmt_date(best.date)}"
 
     def pause_menu(self) -> Menu:
         return Menu("Pausa", [
@@ -148,7 +174,7 @@ class Session(QObject):
             Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
             Option("Calibrar el retardo", self.start_calibration),
             Option("Salir", QGuiApplication.quit),
-        ], body=f"{self.chart.artist} – {self.chart.title}", on_back=self.resume)
+        ], body=lambda: f"{self.chart.artist} – {self.chart.title}<br>{self.record_line()}", on_back=self.resume)
 
     def results_menu(self) -> Menu:
         return Menu("Fin de la canción", [
@@ -180,6 +206,9 @@ class Session(QObject):
             return f"{round(v * 100)} %"
 
         return Menu("Ajustes", [
+            Option("Dificultad por defecto", value=lambda: DIFF_NAMES.get(cfg.difficulty, cfg.difficulty),
+                   change=cycler(list(reversed(DIFFS)), lambda: cfg.difficulty,
+                                 lambda v: (setattr(cfg, "difficulty", v), cfg.save()))),
             Option("Velocidad de las notas", value=lambda: f"{cfg.note_speed:.1f}".replace(".", ","),
                    change=num("note_speed", 0.1, 0.5, 2.0)),
             Option("Volumen", value=lambda: pct(cfg.volume),
@@ -345,6 +374,9 @@ class Session(QObject):
             if self.autoplay:
                 self.play_itself(t)
             self.game.update(t)
+            if self.best_score and not self.partial and not self.record_toast and self.game.stats.score > self.best_score:
+                self.record_toast = True
+                self.toast("¡Nuevo récord!")
         for kind, _, ns in self.game.events:
             if kind == "hit":
                 for f in ns.note.frets:
@@ -356,7 +388,7 @@ class Session(QObject):
                     self.miss_lane_t[f] = now
         self.game.events.clear()
         if not self.results and (self.game.finished and t > self.chart.duration_ms - 500 or self.player.finished):
-            self.results = self.summary()
+            self.results = self.finish_song()
             self.player.pause()
             self.menus = [self.results_menu()]
 
@@ -386,7 +418,7 @@ class Session(QObject):
             "missLane": [max(0.0, 1 - (now - mt) / 0.4) for mt in self.miss_lane_t],
             "score": st.score, "streak": st.streak, "mult": st.multiplier, "accuracy": st.accuracy,
             "title": f"{self.chart.artist} – {self.chart.title}", "difficulty": DIFF_NAMES[self.difficulty],
-            "autoplay": self.autoplay,
+            "autoplay": self.autoplay, "best": self.best_score, "partial": self.partial,
             "progress": max(0.0, min(1.0, t / max(1, self.chart.duration_ms))),
             "countdown": countdown, "menu": menu, "menuHint": MENU_HINT if menu else "", "calib": calib,
             "toast": self.toast_text if now < self.toast_until else "",
@@ -444,19 +476,53 @@ class Session(QObject):
             self.held = [i in g.held for i in range(5)]
             g.strum(ns.note.time_ms)
 
-    def summary(self) -> str:
+    def finish_song(self) -> str:
+        """Guarda la partida (si cuenta) y devuelve el resumen para el menú del final."""
         st = self.game.stats
         total = sum(ns.state != SKIPPED for ns in self.game.notes)
-        lines = [f"<b>{DIFF_NAMES[self.difficulty]}: {st.hits}/{total} notas ({st.accuracy:.0%})</b>",
-                 f"Puntos: {round(st.score):,}".replace(",", "."),
-                 f"Mejor racha: {st.best_streak} · Strums de más: {st.overstrums}"]
+        play = Play(round(st.score), round(st.accuracy, 4), st.hits, total, st.best_streak, st.overstrums)
+        if self.partial:
+            record = ("No cuenta para récords (modo automático o empezada a mitad)<br>"
+                      + self.record_line())
+        else:
+            prev = self.records.add_play(self.chart.audio_sha256, self.difficulty, play,
+                                         self.chart.title, self.chart.artist)
+            self.best_score = max(self.best_score, play.score)
+            if prev is None:
+                record = self.record_line()
+            elif prev.score == 0 and play.score == 0:
+                record = f"Primera partida en {DIFF_NAMES[self.difficulty]}"
+            elif prev.score == 0:
+                record = "<font color='#ffdc00'><b>¡Primer récord!</b></font>"
+            else:
+                record = (f"<font color='#ffdc00'><b>¡Nuevo récord!</b></font> "
+                          f"(+{fmt_int(play.score - prev.score)}; antes {fmt_int(prev.score)})")
+        return self.summary(play, record)
+
+    def summary(self, play: Play, record: str) -> str:
+        st = self.game.stats
+        lines = [f"<b>{DIFF_NAMES[self.difficulty]}: {play.hits}/{play.total} notas ({play.accuracy:.0%})"
+                 f"{' · ¡sin fallos!' if play.full_combo else ''}</b>",
+                 f"Puntos: {fmt_int(play.score)}",
+                 f"Mejor racha: {st.best_streak} · Strums de más: {st.overstrums}", record]
         if len(st.offsets) >= 20:
             offs = sorted(st.offsets)
             med = offs[len(offs) // 2]
-            when = "tarde" if med > 0 else "pronto"
-            lines.append(f"Tus strums van de media {abs(med):.0f} ms {when}" +
-                         (" (si te pasa siempre, calibra el retardo)" if abs(med) > 25 else ""))
+            if abs(med) < 3:
+                lines.append("Tus strums van justo a tiempo")
+            else:
+                when = "tarde" if med > 0 else "pronto"
+                lines.append(f"Tus strums van de media {abs(med):.0f} ms {when}" +
+                             (" (si te pasa siempre, calibra el retardo)" if abs(med) > 25 else ""))
         return "<br>".join(lines)
+
+
+def fmt_int(n: float) -> str:
+    return f"{round(n):,}".replace(",", ".")
+
+
+def fmt_date(iso: str) -> str:
+    return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}" if len(iso) >= 10 else iso
 
 
 class Bridge(QObject):
@@ -509,7 +575,8 @@ def resolve(path: Path) -> Chart:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("song", type=Path, help="audio (busca su chart en out/charts) o carpeta de chart")
-    parser.add_argument("--difficulty", choices=DIFFS, help="por defecto, la de la config (la última elegida)")
+    parser.add_argument("--difficulty", choices=DIFFS,
+                        help="por defecto, la última elegida en esa canción o, si no, la de por defecto (Ajustes)")
     parser.add_argument("--speed", type=float, help="velocidad de las notas (1 = normal); el menú la guarda")
     parser.add_argument("--screenshot", type=Path, help="guarda una captura a los N s (--screenshot-at) y sale")
     parser.add_argument("--screenshot-at", type=float, default=8.0)
@@ -536,8 +603,10 @@ def main() -> int:
     inputs.set_game_keys(True)
     for e in inputs.errors:
         print("aviso:", e)
-    bridge.session = Session(chart, cfg, args.difficulty or cfg.difficulty, inputs, view)
-    bridge.session.autoplay = args.autoplay
+    records = Records()
+    difficulty = args.difficulty or records.difficulty(chart.audio_sha256) or cfg.difficulty
+    bridge.session = Session(chart, cfg, difficulty, inputs, view, records)
+    bridge.session.set_autoplay(args.autoplay)
 
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     keepalive = QTimer()  # deja que Python atienda Ctrl+C
