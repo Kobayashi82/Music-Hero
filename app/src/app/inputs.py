@@ -13,6 +13,8 @@ En el buscador, letras, números y Espacio escriben (los trastes siguen en la gu
 Siempre: Ctrl+Alt+H mostrar/ocultar (oculto = pausa y teclado libre), Ctrl+Alt+Q salir.
 Guitarra: + menú (pausa), − cambiar de dificultad; en los menús, strum mover, verde o + elegir,
 rojo o − volver. Si la guitarra se apaga o se enciende más tarde, se reconecta sola.
+Wiimote (donde va enchufada la guitarra): A mostrar/ocultar, 1 canción siguiente, 2 anterior, Home al azar
+(siguiendo a AIMP, siguiente y anterior se las pide a AIMP).
 """
 
 from __future__ import annotations
@@ -48,6 +50,8 @@ DEFAULT_KEYS = {a: key for a, _, key, _ in ACTIONS}
 ACTION_NAMES = {a: name for a, name, _, _ in ACTIONS}
 ACTION_EVENTS = {a: ev for a, _, _, ev in ACTIONS}
 TEXT_CHARS = "abcdefghijklmnñopqrstuvwxyz0123456789 "
+# botones del propio Wiimote (los 2 bytes de botones de sus informes, wiibrew.org/wiki/Wiimote) -> control
+WIIMOTE_BUTTONS = {0x0008: "toggle", 0x0002: "next", 0x0001: "prev", 0x0080: "random"}  # A, 1, 2, Home
 
 
 def keymap(custom: dict[str, str] | None) -> dict[str, str]:
@@ -320,4 +324,7 @@ class GuitarSource:
                     self.events.put(InputEvent(now, "control", "start"))
                 if s.select and not prev.select:
                     self.events.put(InputEvent(now, "control", "select"))
+                for mask, name in WIIMOTE_BUTTONS.items():
+                    if s.wiimote & mask and not prev.wiimote & mask:
+                        self.events.put(InputEvent(now, "control", name))
             prev = s

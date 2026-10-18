@@ -98,7 +98,7 @@ class Menu:
         shown = [self.options[i] for i in idx]
         return {"title": self.title, "body": self.body, "sel": sel, "editing": self.editing,
                 "items": [o.label for o in shown], "values": [o.value() if callable(o.value) else (o.value or "") for o in shown],
-                "above": above, "below": below, "wrap": wrap, "editHint": self.edit_hint,
+                "above": above, "below": below, "wrap": wrap, "editHint": self.edit_hint, "rows": idx,
                 "position": f"{self.sel + 1} / {n}" if self.long else ""}
 
 

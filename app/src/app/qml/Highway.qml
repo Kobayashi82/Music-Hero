@@ -431,6 +431,19 @@ Item {
         anchors.centerIn: parent
         width: Math.min(root.width - 40, 560); height: menuCol.implicitHeight + 48; radius: 14
         color: "#f0101024"; border.color: "#70ffffff"; border.width: 1.5
+        MouseArea {  // ratón (la ventana solo lo recibe con un menú abierto): rueda para moverse, derecho para volver
+            anchors.fill: parent
+            acceptedButtons: Qt.RightButton
+            property real acc: 0
+            onClicked: bridge.menuBack()
+            onWheel: (wheel) => {
+                acc += wheel.angleDelta.y
+                while (Math.abs(acc) >= 120) {
+                    bridge.menuWheel(acc > 0 ? -1 : 1)
+                    acc -= acc > 0 ? 120 : -120
+                }
+            }
+        }
         Column {
             id: menuCol
             x: 28; y: 24; width: parent.width - 56; spacing: 6
@@ -447,8 +460,15 @@ Item {
                     readonly property bool selected: index === root.f.menu.sel
                     readonly property bool editing: selected && root.f.menu.editing
                     width: menuCol.width; height: 44; radius: 8
-                    color: editing ? "#402ecc40" : selected ? "#28ffffff" : "transparent"
+                    color: editing ? "#402ecc40" : selected ? "#28ffffff" : rowMouse.containsMouse ? "#14ffffff" : "transparent"
                     border.color: selected ? (editing ? "#2ecc40" : "#90ffffff") : "transparent"; border.width: 2
+                    MouseArea {  // clic: elegir esta opción; derecho: volver
+                        id: rowMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: (mouse) => mouse.button === Qt.RightButton ? bridge.menuBack() : bridge.menuClick(index)
+                    }
                     Rectangle {  // la lista vuelve a empezar (menús circulares)
                         visible: index === root.f.menu.wrap
                         x: 16; y: -4; width: parent.width - 32; height: 2; radius: 1; color: "#50ffffff"

@@ -6,6 +6,7 @@ con la interfaz del reproductor propio (player.Player) para que el juego siga a 
 """
 
 import ctypes
+import subprocess
 import threading
 import time
 from ctypes import wintypes
@@ -24,6 +25,12 @@ kernel32.MapViewOfFile.restype = ctypes.c_void_p
 kernel32.MapViewOfFile.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, ctypes.c_size_t]
 kernel32.UnmapViewOfFile.argtypes = [ctypes.c_void_p]
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+                                                ctypes.POINTER(wintypes.DWORD)]
+user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
 # apiRemote.h del SDK de AIMP
 REMOTE_CLASS = "AIMP2_RemoteInfo"
@@ -100,6 +107,30 @@ class Aimp:
     def command(self, cmd: int) -> None:
         if self.hwnd:
             user32.SendMessageW(self.hwnd, WM_AIMP_COMMAND, cmd, 0)
+
+    def exe(self) -> str | None:
+        """Ruta de AIMP.exe, sacada del proceso de su ventana."""
+        if not self.hwnd:
+            return None
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(self.hwnd, ctypes.byref(pid))
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+        if not handle:
+            return None
+        try:
+            buf, size = ctypes.create_unicode_buffer(1024), wintypes.DWORD(1024)
+            ok = kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size))
+            return buf.value if ok else None
+        finally:
+            kernel32.CloseHandle(handle)
+
+    def play_file(self, path: str) -> bool:
+        """Pone un archivo en AIMP (lo añade a su lista y suena ya): su línea de órdenes, /ADD_PLAY."""
+        exe = self.exe()
+        if not exe:
+            return False
+        subprocess.Popen([exe, "/ADD_PLAY", path], creationflags=subprocess.CREATE_NO_WINDOW)
+        return True
 
     def track(self) -> Track | None:
         """Lee la memoria compartida de AIMP: cabecera + cadenas UTF-16 seguidas."""

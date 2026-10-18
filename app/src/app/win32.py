@@ -21,7 +21,9 @@ SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOOWNERZORDER = 0x1, 0x2, 0x10, 0x20
 
 VK = {"up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27, "enter": 0x0D, "space": 0x20, "esc": 0x1B,
       "backspace": 0x08, "tab": 0x09, "pause": 0x13, "scrolllock": 0x91, "insert": 0x2D, "home": 0x24,
-      "end": 0x23, "pageup": 0x21, "pagedown": 0x22, "delete": 0x2E, "capslock": 0x14}
+      "end": 0x23, "pageup": 0x21, "pagedown": 0x22, "delete": 0x2E, "capslock": 0x14,
+      "media_play": 0xB3, "media_next": 0xB0, "media_prev": 0xB1, "media_stop": 0xB2, "mute": 0xAD,
+      "volume_down": 0xAE, "volume_up": 0xAF}
 VK |= {f"num{i}": 0x60 + i for i in range(10)}
 VK_NAMES = {v: k for k, v in VK.items()}
 # para enseñar las teclas en los menús
@@ -29,6 +31,8 @@ LABELS = {"up": "Flecha arriba", "down": "Flecha abajo", "left": "Flecha izquier
           "enter": "Intro", "space": "Espacio", "esc": "Esc", "backspace": "Retroceso", "tab": "Tab",
           "pause": "Pausa", "scrolllock": "Bloq Despl", "insert": "Insert", "home": "Inicio", "end": "Fin",
           "pageup": "Re Pág", "pagedown": "Av Pág", "delete": "Supr", "capslock": "Bloq Mayús",
+          "media_play": "Play/Pausa", "media_next": "Pista siguiente", "media_prev": "Pista anterior",
+          "media_stop": "Stop", "mute": "Silencio", "volume_down": "Bajar volumen", "volume_up": "Subir volumen",
           "ctrl": "Ctrl", "alt": "Alt", "shift": "Mayús", "win": "Win"}
 VK_SHIFT, VK_CONTROL, VK_MENU = 0x10, 0x11, 0x12
 MODIFIER_VKS = {0x10: "shift", 0xA0: "shift", 0xA1: "shift", 0x11: "ctrl", 0xA2: "ctrl", 0xA3: "ctrl",
@@ -184,3 +188,12 @@ def make_click_through(hwnd: int) -> bool:
     if style & wanted != wanted:
         user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | wanted)
     return user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & wanted == wanted
+
+
+def set_click_through(hwnd: int, on: bool) -> None:
+    """Deja pasar los clics (on) o los recibe (off, con un menú abierto). El resto del estilo no cambia: sigue
+    sin quitar el foco a nadie al pulsar."""
+    style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+    new = style | WS_EX_TRANSPARENT if on else style & ~WS_EX_TRANSPARENT
+    if new != style:
+        user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new)

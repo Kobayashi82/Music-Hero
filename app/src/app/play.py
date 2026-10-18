@@ -36,7 +36,7 @@ from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import calibration, loopback, win32
-from .aimp import CMD_PAUSE, PLAYING, Aimp, AimpPlayer, Track
+from .aimp import CMD_NEXT, CMD_PAUSE, CMD_PREV, PLAYING, Aimp, AimpPlayer, Track
 from .chart import DIFF_NAMES, DIFFS, ROOT, Chart, find_chart
 from .config import Config
 from .gameplay import HIT, MISSED, SKIPPED, Game
@@ -65,6 +65,7 @@ SIDES = {"left": "Izquierda", "right": "Derecha"}
 AIMP_CHECK_S = 0.3  # cada cuánto se mira qué canción tiene AIMP
 OWN_SEEK_S = 0.6  # los saltos que hace el propio juego en AIMP (reiniciar) no cuentan como saltos del usuario
 GENERATE_LOG = ROOT / "out" / "generate_aimp.log"
+SONG_COMMANDS = ("next", "prev", "random")  # botones 1, 2 y Home del Wiimote
 
 
 class Session(QObject):
@@ -103,6 +104,7 @@ class Session(QObject):
         self.guitar_connected: bool | None = None
         self.text_mode = False  # el teclado escribe (buscador abierto)
         self.capturing: str | None = None  # acción esperando su tecla nueva (Ajustes → Teclas)
+        self.mouse_on = False  # la ventana recibe el ratón (hay un menú abierto)
         self.tray: QSystemTrayIcon | None = None  # icono junto al reloj (main)
         self.hidden_hint = False  # ya se avisó de que oculto sigue en el icono
         self.strum_hold: tuple[int, float, float] | None = None  # strum mantenido en un menú: (dirección, desde, siguiente)
@@ -206,6 +208,7 @@ class Session(QObject):
                 self.follow_aimp()  # Ctrl+Alt+H con algo sonando en AIMP: a seguirlo
             self.view.show()
             win32.make_click_through(int(self.view.winId()))
+            self.mouse_on = False  # recién mostrado deja pasar los clics; el próximo fotograma lo ajusta al menú
             self.inputs.set_game_keys(True)
 
     def toast(self, text: str, seconds: float = TOAST_S) -> None:
@@ -472,6 +475,8 @@ class Session(QObject):
             chart.audio_file = Path(e.audio)
             self.stop_following()  # una canción elegida aquí suena en el reproductor propio
             self.load_song(chart)
+            if not self.view.isVisible():
+                self.pause()  # cambiada con el juego oculto (botones del Wiimote): espera a que se muestre
         except Exception as err:  # noqa: BLE001 - una canción rota no tira el juego
             self.toast(f"No se pudo abrir {e.title}: {err}", 6)
             return
@@ -703,6 +708,8 @@ class Session(QObject):
                     self.capturing = None
             elif ev.kind == "control" and ev.value in ("quit", "toggle"):
                 QGuiApplication.quit() if ev.value == "quit" else self.toggle_visible()
+            elif ev.kind == "control" and ev.value in SONG_COMMANDS:
+                self.song_command(ev.value)
             elif self.calib:
                 self.calib_input(ev)
             elif self.menus:
@@ -711,6 +718,60 @@ class Session(QObject):
                 self.game_input(ev)
         if not self.player.playing or self.menus:  # trastes al día para cuando se siga jugando
             self.game.held = {i for i, h in enumerate(self.held) if h}
+
+    def menu_click(self, row: int) -> None:
+        """Clic en la fila row del menú que se ve: se elige esa opción (la que tiene valor, a editarla o dejarla)."""
+        if not self.menus or self.calib or self.capturing:
+            return
+        menu = self.menus[-1]
+        rows = menu.view()["rows"]
+        if not 0 <= row < len(rows):
+            return
+        if menu.editing and rows[row] != menu.sel:
+            menu.editing = False
+        menu.sel = rows[row]
+        menu.select()
+
+    def menu_wheel(self, steps: int) -> None:
+        """Rueda: mueve por la lista (abajo = siguiente) o, editando, cambia el valor (arriba sube)."""
+        if self.menus and not self.calib and not self.capturing:
+            self.menus[-1].move(steps)
+
+    def idle_inputs(self) -> None:
+        """Con el juego oculto no se pinta (ni se llama a frame): aquí se atiende lo que vale estando oculto."""
+        for ev in self.inputs.drain():
+            if ev.kind == "error":
+                self.toast(str(ev.value), 6)
+            elif ev.kind == "control" and ev.value == "quit":
+                QGuiApplication.quit()
+            elif ev.kind == "control" and ev.value == "toggle":
+                self.toggle_visible()
+                return  # lo demás, ya con el juego a la vista
+            elif ev.kind == "control" and ev.value in SONG_COMMANDS:
+                self.song_command(ev.value)
+        if self.follow:
+            self.watch_aimp(time.perf_counter())
+
+    def song_command(self, cmd: str) -> None:
+        """Botones 1, 2 y Home del Wiimote: siguiente, anterior y al azar. Siguiendo a AIMP, se le piden a AIMP
+        (al azar, una canción con chart de la biblioteca); si no, en el orden de la biblioteca."""
+        if self.follow:
+            if cmd == "random":
+                songs = [e for albums in self.tree().values() for s in albums.values() for e in s
+                         if e.audio != self.aimp_file]
+                if songs and self.aimp.play_file(random.choice(songs).audio):
+                    self.toast("AIMP: canción al azar")
+            else:
+                self.aimp.command(CMD_NEXT if cmd == "next" else CMD_PREV)
+                self.toast("AIMP: " + ("siguiente" if cmd == "next" else "anterior"))
+            return
+        if cmd == "random":
+            self.play_random()
+            return
+        songs = [e for albums in self.tree().values() for s in albums.values() for e in s]
+        i = next((k for k, e in enumerate(songs) if e.sha == self.chart.audio_sha256), -1)
+        if songs:
+            self.choose(songs[(i + (1 if cmd == "next" else -1)) % len(songs)])
 
     def calib_input(self, ev) -> None:
         if (ev.kind == "strum" and ev.down) or (ev.kind == "control" and ev.value == "enter"):
@@ -791,6 +852,10 @@ class Session(QObject):
         if text != self.text_mode:
             self.text_mode = text
             self.inputs.set_text_mode(text)
+        mouse = bool(self.menus) and not self.calib  # con un menú abierto, el ratón vale para elegir
+        if mouse != self.mouse_on:
+            self.mouse_on = mouse
+            win32.set_click_through(int(self.view.winId()), not mouse)
         if self.strum_hold and (not self.menus or self.calib):
             self.strum_hold = None
         if self.strum_hold and now >= self.strum_hold[2]:  # strum mantenido: sigue desplazando
@@ -986,6 +1051,22 @@ class Bridge(QObject):
     def tick(self) -> dict:
         return self.session.frame() if self.session else {}
 
+    # ratón en los menús (solo recibe clics con un menú abierto: el resto del tiempo el juego deja pasarlos)
+    @Slot(int)
+    def menuClick(self, row: int) -> None:  # noqa: N802 - nombre para QML
+        if self.session:
+            self.session.menu_click(row)
+
+    @Slot(int)
+    def menuWheel(self, steps: int) -> None:  # noqa: N802
+        if self.session:
+            self.session.menu_wheel(steps)
+
+    @Slot()
+    def menuBack(self) -> None:  # noqa: N802
+        if self.session and self.session.menus and not self.session.capturing:
+            self.session.menu_back()
+
 
 def tray_icon() -> QIcon:
     """La autopista en pequeño: cinco carriles de colores que se juntan hacia arriba, sobre fondo oscuro."""
@@ -1041,8 +1122,10 @@ def place_view(view: QQuickView, cfg: Config) -> None:
 
 def make_view(cfg: Config, bridge: Bridge) -> QQuickView:
     view = QQuickView()
+    # sin WindowTransparentForInput de Qt (descartaría el ratón también en los menús): los clics los deja pasar
+    # el estilo WS_EX_TRANSPARENT (win32.make_click_through / set_click_through), que se quita con un menú abierto
     view.setFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool
-                  | Qt.WindowType.WindowTransparentForInput | Qt.WindowType.WindowDoesNotAcceptFocus)
+                  | Qt.WindowType.WindowDoesNotAcceptFocus)
     view.setColor(QColor(0, 0, 0, 0))
     view.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
     view.setProperty("_q_showWithoutActivating", True)
@@ -1130,6 +1213,9 @@ def main() -> int:
     topmost = QTimer()
     topmost.timeout.connect(lambda: view.isVisible() and win32.bring_to_top(int(view.winId())))
     topmost.start(500)
+    idle = QTimer()  # oculto no se pinta: el atajo, salir y los botones del Wiimote se atienden aquí
+    idle.timeout.connect(lambda: None if view.isVisible() else session.idle_inputs())
+    idle.start(50)
     if args.screenshot:
         def shot() -> None:
             app.primaryScreen().grabWindow(0).save(str(args.screenshot))
