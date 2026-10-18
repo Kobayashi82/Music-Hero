@@ -37,7 +37,7 @@ class InputEvent:
     t: float  # time.perf_counter()
     kind: str  # "fret" | "strum" | "control" | "char"
     value: int | str = 0  # traste 0..4, dirección del strum (-1 arriba, 1 abajo), nombre del control o letra
-    down: bool = True
+    down: bool = True  # False: se suelta (trastes y strum; mantener el strum desplaza los menús)
 
 
 class Inputs:
@@ -136,7 +136,7 @@ class KeyboardSource:
                 self.errors.append(f"no se pudo registrar {combo} (¿lo usa otra app?)")
         self._ready.set()
         win32.winmm.timeBeginPeriod(1)
-        held: dict[int, int] = {}  # tecla virtual -> traste
+        held: dict[int, tuple[str, int]] = {}  # tecla virtual -> (traste o strum, valor), para ver la suelta
         try:
             while True:
                 while win32.user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, win32.PM_REMOVE):
@@ -148,18 +148,18 @@ class KeyboardSource:
                             self._game = bool(msg.wParam)
                         else:
                             self._text = bool(msg.wParam)
-                        for fret in held.values():  # los trastes pulsados se sueltan: no se quedan pegados
-                            self.events.put(InputEvent(now, "fret", fret, False))
+                        for kind, value in held.values():  # lo pulsado se suelta: no se queda pegado
+                            self.events.put(InputEvent(now, kind, value, False))
                         held.clear()
                         self._sync_keys()
                     elif msg.message == win32.WM_HOTKEY and msg.wParam in self._ids:
                         kind, value, vk = self._ids[msg.wParam]
                         self.events.put(InputEvent(now, kind, value, True))
-                        if kind == "fret":
-                            held[vk] = value
+                        if kind in ("fret", "strum"):
+                            held[vk] = (kind, value)
                 now = time.perf_counter()
                 for vk in [vk for vk in held if not win32.key_down(vk)]:
-                    self.events.put(InputEvent(now, "fret", held.pop(vk), False))
+                    self.events.put(InputEvent(now, *held.pop(vk), False))
                 time.sleep(0.001)
         finally:
             for hk_id in list(self._ids):
@@ -227,10 +227,10 @@ class GuitarSource:
                 for i, (a, b) in enumerate(zip(prev.frets, s.frets)):
                     if a != b:
                         self.events.put(InputEvent(now, "fret", i, b))
-                if s.strum_up and not prev.strum_up:
-                    self.events.put(InputEvent(now, "strum", -1))
-                if s.strum_down and not prev.strum_down:
-                    self.events.put(InputEvent(now, "strum", 1))
+                if s.strum_up != prev.strum_up:
+                    self.events.put(InputEvent(now, "strum", -1, s.strum_up))
+                if s.strum_down != prev.strum_down:
+                    self.events.put(InputEvent(now, "strum", 1, s.strum_down))
                 if s.start and not prev.start:
                     self.events.put(InputEvent(now, "control", "start"))
                 if s.select and not prev.select:

@@ -48,6 +48,7 @@ CALIB_LANE = 2  # las notas de la calibración bajan por el carril amarillo (el 
 MENU_HINT = "Strum: mover · Verde / +: elegir · Rojo / −: volver"
 LONG_HINT = MENU_HINT + " · Amarillo / Azul: saltar 10"
 POSITIONS = {"left": "Izquierda", "center": "Centro", "right": "Derecha"}
+MENU_REPEAT_S = (0.35, 0.08, 0.035)  # strum mantenido en un menú: espera, repetición y, pasados 2 s, más rápido
 SIDES = {"left": "Izquierda", "right": "Derecha"}
 
 
@@ -72,6 +73,7 @@ class Session(QObject):
         self.toast_text, self.toast_until = "", 0.0
         self.guitar_connected: bool | None = None
         self.text_mode = False  # el teclado escribe (buscador abierto)
+        self.strum_hold: tuple[int, float, float] | None = None  # strum mantenido en un menú: (dirección, desde, siguiente)
         self.message = "; ".join(inputs.errors)
         self.autoplay = False
         self.partial = False  # la partida no cuenta para récords (automático o empezada a mitad)
@@ -428,7 +430,7 @@ class Session(QObject):
             self.game.held = {i for i, h in enumerate(self.held) if h}
 
     def calib_input(self, ev) -> None:
-        if ev.kind == "strum" or (ev.kind == "control" and ev.value == "enter"):
+        if (ev.kind == "strum" and ev.down) or (ev.kind == "control" and ev.value == "enter"):
             ms = self.calib.position_ms(ev.t)
             self.calib_strums.append(ms)
             i = calibration.nearest(ms)
@@ -441,6 +443,10 @@ class Session(QObject):
 
     def menu_input(self, ev) -> None:
         menu = self.menus[-1]
+        if ev.kind == "strum" and not ev.down:
+            if self.strum_hold and self.strum_hold[0] == ev.value:
+                self.strum_hold = None
+            return
         if isinstance(menu, SearchMenu):
             if ev.kind == "char":
                 menu.type(ev.value)
@@ -450,6 +456,7 @@ class Session(QObject):
                 return
         if ev.kind == "strum":
             menu.move(ev.value)
+            self.strum_hold = (ev.value, ev.t, ev.t + MENU_REPEAT_S[0])
         elif ev.kind == "fret" and ev.down and ev.value in (0, 1):
             menu.select() if ev.value == 0 else self.menu_back()
         elif ev.kind == "fret" and ev.down and ev.value in (2, 3):
@@ -479,7 +486,7 @@ class Session(QObject):
         t = self.player.position_ms(ev.t)
         if ev.kind == "fret":
             self.game.fret(ev.value, ev.down, t)
-        elif ev.kind == "strum":
+        elif ev.kind == "strum" and ev.down:
             self.game.strum(t)
 
     # ---------- cada fotograma ----------
@@ -501,6 +508,12 @@ class Session(QObject):
         if text != self.text_mode:
             self.text_mode = text
             self.inputs.set_text_mode(text)
+        if self.strum_hold and (not self.menus or self.calib):
+            self.strum_hold = None
+        if self.strum_hold and now >= self.strum_hold[2]:  # strum mantenido: sigue desplazando
+            d, since, _ = self.strum_hold
+            self.menus[-1].move(d)
+            self.strum_hold = (d, since, now + MENU_REPEAT_S[1 if now - since < 2 else 2])
         if self.calib and self.calib.finished:
             self.finish_calibration()
         t = self.player.position_ms(now)
@@ -548,7 +561,7 @@ class Session(QObject):
                      "progress": min(1.0, self.calib.position_ms() / calibration.click_times_ms()[-1])}
         burn = self.game.sustaining_frets
         return {
-            "notes": notes, "beats": beats, "held": self.held, "time": now,
+            "notes": notes, "beats": beats, "held": self.held if not self.menus else [False] * 5,  # en los menús no se encienden los botones "time": now,
             "flash": [max(0.0, 1 - (now - ft) / 0.3) for ft in self.flash_t],
             "burn": [i in burn for i in range(5)],
             "missFlash": max(0.0, 1 - (now - self.miss_t) / 0.35),
