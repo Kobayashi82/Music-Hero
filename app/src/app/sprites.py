@@ -10,6 +10,9 @@ Ids:
     glow/<carril|white>                halo suave redondo (GLOW x GLOW)
     tail/<carril>/<normal|live|miss|star|starlive>   cola de una nota larga (TAIL_W x TAIL_H; live = mientras
                                        se mantiene; star = de una frase de star power, azul).
+    side/<0|1>/<glow|spark>            star power listo: resplandor por fuera del raíl izquierdo (0) o derecho (1) y
+                                       luz que sube por él (SIDE_W x TAIL_H; el raíl queda del lado de dentro).
+                                       QML los proyecta como las colas
                                        QML la proyecta en perspectiva sobre el carril (Highway.qml: quad)
 """
 
@@ -31,6 +34,7 @@ DEPTH = 16  # grosor de la pieza
 FLAME_W, FLAME_H, FLAME_BASE, FLAME_FRAMES = 160, 320, 34, 6
 GLOW = 256
 TAIL_W, TAIL_H = 64, 256
+SIDE_W = 128
 SS = 2  # superresolución
 
 
@@ -407,6 +411,28 @@ def draw_tail(lane: int, kind: str) -> QImage:
     return QImage(arr.data, TAIL_W, TAIL_H, TAIL_W * 4, QImage.Format.Format_RGBA8888_Premultiplied).copy()
 
 
+def draw_side(side: int, kind: str) -> QImage:
+    """Por fuera del raíl, calculado píxel a píxel como las colas: sin bordes. glow: resplandor azul que se
+    difumina hacia fuera y hacia el horizonte, más claro pegado al raíl. spark: luz blanca azulada, un tramo
+    corto y suave (QML la hace subir)."""
+    x = np.linspace(0, 1, SIDE_W)[None, :]  # 0 junto al raíl .. 1 fuera
+    if side == 0:  # a la izquierda el raíl queda a la derecha del lienzo
+        x = x[:, ::-1]
+    t = np.linspace(0, 1, TAIL_H)[:, None]  # 0 arriba (horizonte) .. 1 abajo
+    col = np.array([QColor(STAR).redF(), QColor(STAR).greenF(), QColor(STAR).blueF()])
+    if kind == "glow":
+        across = np.exp(-(x / 0.42) ** 2) * 0.75 + np.exp(-(x / 0.07) ** 2) * 0.25
+        along = np.clip(t / 0.6, 0, 1) ** 1.5  # nada en el horizonte, pleno abajo
+        a = np.clip(across * along, 0, 1)
+        lift = np.exp(-(x / 0.12) ** 2) * 0.6  # pegado al raíl, casi blanco
+    else:
+        a = np.clip(np.exp(-(x / 0.3) ** 2) * np.exp(-((t - 0.55) / 0.2) ** 2), 0, 1)
+        lift = np.full_like(a, 0.7)
+    rgb = col[None, None, :] + (1 - col[None, None, :]) * lift[..., None] * np.ones_like(a)[..., None]
+    arr = np.ascontiguousarray((np.dstack([rgb * a[..., None], a]) * 255).astype(np.uint8))
+    return QImage(arr.data, SIDE_W, TAIL_H, SIDE_W * 4, QImage.Format.Format_RGBA8888_Premultiplied).copy()
+
+
 def draw(sprite_id: str) -> QImage:
     parts = sprite_id.split("/")
     kind = parts[0]
@@ -418,6 +444,8 @@ def draw(sprite_id: str) -> QImage:
         return draw_flame(int(parts[1]), int(parts[2]) % FLAME_FRAMES)
     if kind == "glow":
         return draw_glow(parts[1])
+    if kind == "side":
+        return draw_side(int(parts[1]), parts[2])
     if kind == "tail":
         return draw_tail(int(parts[1]), parts[2])
     raise KeyError(sprite_id)

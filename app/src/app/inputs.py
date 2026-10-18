@@ -7,10 +7,10 @@ Teclado, con el juego activo (las teclas no llegan a la app que tenga el foco). 
 (ACTIONS); se cambian en Ajustes → Teclas y se guardan en config.keys:
     A S D F G          trastes verde, rojo, amarillo, azul, naranja
     flechas arriba/abajo, Intro   strum (en los menús: mover; Intro elige)
-    Espacio            menú (pausa)   Retroceso   reiniciar la canción (en los menús: volver)
+    Espacio            menú (pausa)   Esc   reiniciar la canción (en los menús: volver)
     Tab                cambiar de dificultad sin parar la canción
     E                  activar el star power
-En el buscador, letras, números y Espacio escriben (los trastes siguen en la guitarra).
+En el buscador, letras, números y Espacio escriben y Retroceso borra (los trastes siguen en la guitarra).
 Siempre: Ctrl+Alt+H mostrar/ocultar (oculto = pausa y teclado libre), Ctrl+Alt+Q salir.
 Guitarra: + menú (pausa), − cambiar de dificultad, levantar el mástil activa el star power (acelerómetro del
 Wiimote, starpower.Tilt); en los menús, strum mover, verde o + elegir,
@@ -44,7 +44,7 @@ ACTIONS = [
     ("strum_up", "Strum arriba", "up", ("strum", -1)),
     ("strum_down", "Strum abajo", "down", ("strum", 1)),
     ("pause", "Menú (pausa)", "space", ("control", "pause")),
-    ("restart", "Reiniciar / volver", "backspace", ("control", "restart")),
+    ("restart", "Reiniciar / volver", "esc", ("control", "restart")),
     ("difficulty", "Cambiar de dificultad", "tab", ("control", "difficulty")),
     ("star", "Star power", "e", ("control", "star")),
     ("enter", "Elegir", "enter", ("control", "enter")),
@@ -54,6 +54,7 @@ DEFAULT_KEYS = {a: key for a, _, key, _ in ACTIONS}
 ACTION_NAMES = {a: name for a, name, _, _ in ACTIONS}
 ACTION_EVENTS = {a: ev for a, _, _, ev in ACTIONS}
 TEXT_CHARS = "abcdefghijklmnñopqrstuvwxyz0123456789 "
+BACKSPACE = "\b"  # en el buscador, Retroceso llega como InputEvent("char", BACKSPACE)
 # botones del propio Wiimote (los 2 bytes de botones de sus informes, wiibrew.org/wiki/Wiimote) -> control
 WIIMOTE_BUTTONS = {0x0008: "toggle", 0x0002: "next", 0x0001: "prev", 0x0080: "random"}  # A, 1, 2, Home
 
@@ -193,7 +194,9 @@ class KeyboardSource:
             del self._ids[hk_id]
         if not self._game:
             return
-        text_vks = {vk for c in TEXT_CHARS if (vk := win32.vk_of_char(c))} if self._text else set()
+        text_vks = set()
+        if self._text:
+            text_vks = {vk for c in TEXT_CHARS if (vk := win32.vk_of_char(c))} | {win32.VK["backspace"]}
         keys = {}
         for i, (action, _, _, (kind, value)) in enumerate(ACTIONS):
             vk = win32.vk_of(self.keys[action].split("+")[-1])
@@ -201,6 +204,7 @@ class KeyboardSource:
                 keys[100 + i] = (kind, value, vk, action)
         if self._text:
             keys |= {200 + i: ("char", c, vk, "") for i, c in enumerate(TEXT_CHARS) if (vk := win32.vk_of_char(c))}
+            keys[299] = ("char", BACKSPACE, win32.VK["backspace"], "")
         for hk_id, (kind, value, vk, action) in keys.items():
             if win32.user32.RegisterHotKey(None, hk_id, win32.MOD_NOREPEAT, vk):
                 self._ids[hk_id] = (kind, value, vk)

@@ -41,7 +41,7 @@ from .aimp import CMD_NEXT, CMD_PAUSE, CMD_PREV, PLAYING, Aimp, AimpPlayer, Trac
 from .chart import DIFF_NAMES, DIFFS, ROOT, Chart, find_chart
 from .config import Config
 from .gameplay import HIT, MISSED, SKIPPED, Game
-from .inputs import ACTION_NAMES, ACTIONS, GLOBAL_ACTIONS, Inputs, assign, keymap
+from .inputs import ACTION_NAMES, ACTIONS, BACKSPACE, GLOBAL_ACTIONS, Inputs, assign, keymap
 from .library import Entry, group, scan, search
 from .lyrics import Lyrics
 from .menu import Menu, Option, SearchMenu, cycler, stepper
@@ -811,10 +811,7 @@ class Session(QObject):
             return
         if isinstance(menu, SearchMenu):
             if ev.kind == "char":
-                menu.type(ev.value)
-                return
-            if ev.kind == "control" and ev.value == "restart" and menu.query:  # Retroceso borra
-                menu.backspace()
+                menu.backspace() if ev.value == BACKSPACE else menu.type(ev.value)
                 return
         if ev.kind == "strum":
             menu.move(ev.value)

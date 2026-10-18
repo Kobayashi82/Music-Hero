@@ -167,63 +167,43 @@ Item {
             }
         }
     }
-    Repeater {  // star power listo: por fuera de cada raíl, un resplandor azul que late y luces que suben (levántala)
+    Repeater {  // star power listo: por fuera de cada raíl, un resplandor azul que late y luces que suben (levántala).
+        // Texturas suaves (sprites side/...) proyectadas en perspectiva, como las colas de las notas largas
         model: 2
         Item {
             id: side
             anchors.fill: parent
             visible: root.f.starReady
+            readonly property int which: index
             readonly property real dir: index === 0 ? -1 : 1  // hacia fuera
-            readonly property real edge: 2 + side.dir * 2.62  // borde de fuera del raíl, en carriles
-            readonly property real pulse: 0.5 + 0.5 * Math.sin(root.f.time * 6)
-            Repeater {  // tres franjas cada vez más flojas: se difumina hacia fuera
-                model: 3
-                Shape {
-                    id: band
-                    preferredRendererType: Shape.CurveRenderer
-                    anchors.fill: parent
-                    readonly property real l0: side.edge + side.dir * 0.2 * index
-                    readonly property real l1: side.edge + side.dir * 0.2 * (index + 1)
-                    opacity: (0.5 + 0.5 * side.pulse) * [1, 0.6, 0.3][index]
-                    ShapePath {
-                        strokeWidth: 0; strokeColor: "transparent"
-                        fillGradient: LinearGradient {
-                            y1: root.horizonY; y2: root.yAt(-0.25)
-                            GradientStop { position: 0; color: "transparent" }
-                            GradientStop { position: 0.3; color: "#a07fd4ff" }
-                            GradientStop { position: 1; color: root.starColor }
-                        }
-                        startX: root.xAt(band.l0, 1); startY: root.horizonY
-                        PathLine { x: root.xAt(band.l1, 1); y: root.horizonY }
-                        PathLine { x: root.xAt(band.l1, -0.25); y: root.yAt(-0.25) }
-                        PathLine { x: root.xAt(band.l0, -0.25); y: root.yAt(-0.25) }
-                    }
-                }
+            readonly property real edge: 2 + dir * 2.62  // borde de fuera del raíl, en carriles
+            readonly property real reach: 0.75  // cuánto se extiende hacia fuera, en carriles
+            // lado izquierdo y derecho del lienzo, en carriles (el raíl, dentro)
+            readonly property real la: index === 0 ? edge - reach : edge
+            readonly property real lb: index === 0 ? edge : edge + reach
+            function quadFor(img, u0, u1) {
+                return root.quad(img.width, img.height,
+                                 root.xAt(la, u1), root.yAt(u1), root.xAt(lb, u1), root.yAt(u1),
+                                 root.xAt(lb, u0), root.yAt(u0), root.xAt(la, u0), root.yAt(u0))
             }
-            Repeater {  // destellos que suben por el raíl, de la línea de golpeo al horizonte
+            Image {
+                id: glow
+                source: root.sprite("side/" + index + "/glow"); smooth: true
+                x: 0; y: 0; width: 128; height: 256
+                opacity: 0.55 + 0.45 * Math.sin(root.f.time * 6)
+                transform: Matrix4x4 { matrix: side.quadFor(glow, -0.25, 1) }
+            }
+            Repeater {  // dos luces que suben de la línea de golpeo al horizonte
                 model: 2
-                Shape {
-                    id: streak
-                    preferredRendererType: Shape.CurveRenderer
-                    anchors.fill: parent
-                    readonly property real u0: ((root.f.time * 0.9 + index * 0.7) % 1.4) - 0.25
-                    readonly property real u1: Math.min(1, u0 + 0.3)
-                    readonly property real l0: side.edge - side.dir * 0.14  // desde el raíl
-                    readonly property real l1: side.edge + side.dir * 0.45
+                Image {
+                    id: spark
+                    readonly property real u0: ((root.f.time * 0.9 + index * 0.7) % 1.4) - 0.3
+                    readonly property real u1: u0 + 0.35
+                    source: root.sprite("side/" + side.which + "/spark"); smooth: true
+                    x: 0; y: 0; width: 128; height: 256
                     visible: u0 < 0.95
-                    ShapePath {
-                        strokeWidth: 0; strokeColor: "transparent"
-                        fillGradient: LinearGradient {
-                            y1: root.yAt(streak.u1); y2: root.yAt(streak.u0)
-                            GradientStop { position: 0; color: "transparent" }
-                            GradientStop { position: 0.75; color: "#e0ffffff" }
-                            GradientStop { position: 1; color: "transparent" }
-                        }
-                        startX: root.xAt(streak.l0, streak.u1); startY: root.yAt(streak.u1)
-                        PathLine { x: root.xAt(streak.l1, streak.u1); y: root.yAt(streak.u1) }
-                        PathLine { x: root.xAt(streak.l1, streak.u0); y: root.yAt(streak.u0) }
-                        PathLine { x: root.xAt(streak.l0, streak.u0); y: root.yAt(streak.u0) }
-                    }
+                    opacity: Math.min(1, (1 - u0) * 2)  // se apaga al llegar arriba
+                    transform: Matrix4x4 { matrix: side.quadFor(spark, Math.max(-0.25, spark.u0), Math.min(1, spark.u1)) }
                 }
             }
         }

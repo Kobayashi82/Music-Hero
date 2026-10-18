@@ -1,6 +1,6 @@
 """Menús del overlay: lista de opciones que se recorre con el strum. Sin Qt (la vista solo pinta view()).
 
-- Strum arriba/abajo: mover. Verde, + o Intro: elegir. Rojo, − o Retroceso: volver.
+- Strum arriba/abajo: mover. Verde, + o Intro: elegir. Rojo, − o Esc: volver.
 - Una opción con valor (change) se elige para editarla: el strum la cambia (arriba sube) y elegir o
   volver deja de editar. Los cambios se aplican en el momento.
 - Las listas largas se ven por páginas de WINDOW opciones: la página se queda quieta y se mueve la selección;
