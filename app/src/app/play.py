@@ -48,6 +48,7 @@ CALIB_LANE = 2  # las notas de la calibración bajan por el carril amarillo (el 
 MENU_HINT = "Strum: mover · Verde / +: elegir · Rojo / −: volver"
 LONG_HINT = MENU_HINT + " · Amarillo / Azul: saltar 10"
 POSITIONS = {"left": "Izquierda", "center": "Centro", "right": "Derecha"}
+SIDES = {"left": "Izquierda", "right": "Derecha"}
 
 
 class Session(QObject):
@@ -337,6 +338,9 @@ class Session(QObject):
                    change=num("highway_width", 40, 320, 1200, self.place)),
             Option("Posición", value=lambda: POSITIONS.get(cfg.position, cfg.position),
                    change=cycler(list(POSITIONS), lambda: cfg.position, set_position)),
+            Option("Marcador", value=lambda: SIDES.get(cfg.hud_side, cfg.hud_side),
+                   change=cycler(list(SIDES), lambda: cfg.hud_side,
+                                 lambda v: (setattr(cfg, "hud_side", v), cfg.save()))),
             Option("Letra", value=lambda: "Sí" if cfg.lyrics else "No",
                    change=cycler([False, True], lambda: cfg.lyrics,
                                  lambda v: (setattr(cfg, "lyrics", v), cfg.save()))),
@@ -557,7 +561,7 @@ class Session(QObject):
             "menuHint": (LONG_HINT if self.menus[-1].long else MENU_HINT) if menu else "",
             "toast": self.toast_text if now < self.toast_until else "",
             "message": self.message, "opacity": self.cfg.opacity, "hwWidth": self.cfg.highway_width,
-            "lyricsOn": self.cfg.lyrics, "lyrics": lyrics,
+            "lyricsOn": self.cfg.lyrics, "lyrics": lyrics, "hudSide": self.cfg.hud_side,
         }
 
     def calib_notes(self, now: float, travel: float) -> tuple[list, list]:

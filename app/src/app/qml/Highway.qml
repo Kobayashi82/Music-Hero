@@ -3,7 +3,7 @@
 //          1 = horizonte; estado 0 pendiente, 1 acertada, 2 fallada)
 //   beats: [u, inicioDeCompás] x N, held / burn (sustain sonando): 5 bool, flash / missLane: 5 (0..1),
 //   time (s, para el parpadeo de las llamas), el marcador, menu (title, body, items, values, sel, editing;
-//   vacío si no hay), calib, toast, message, lyricsOn y lyrics (current, fill = caracteres ya cantados,
+//   vacío si no hay), calib, toast, message, hudSide (marcador: "left" | "right"), lyricsOn y lyrics (current, fill = caracteres ya cantados,
 //   con decimales, y next; vacío si no hay letra).
 import QtQuick
 import QtQuick.Shapes
@@ -14,7 +14,7 @@ Item {
                        score: 0, streak: 0, mult: 1, accuracy: 1, title: "", difficulty: "", message: "",
                        progress: 0, countdown: 0, menu: ({}), menuHint: "", calib: ({}), toast: "",
                        opacity: 0.85, missFlash: 0, missLane: [0, 0, 0, 0, 0], burn: [false, false, false, false, false],
-                       time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560,
+                       time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560, hudSide: "left",
                        lyricsOn: false, lyrics: ({}) })
     readonly property var colors: ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
     readonly property var multColors: ["white", "#ffdc00", "#2ecc40", "#c86cff"]
@@ -267,19 +267,27 @@ Item {
         }
     }
 
-    // ---------- marcador: a la izquierda, tumbado en el plano de la autopista junto al raíl ----------
+    // ---------- marcador: a un lado (Ajustes), tumbado en el plano de la autopista junto al raíl ----------
     function uAtY(y) {  // la inversa de yAt
         var sv = 1 - (strikeY - y) * (1 - farScale) / (strikeY - horizonY)
         return (1 / sv - 1) / k
     }
     Item {
         id: hud
-        // lienzo plano (width x height) proyectado sobre el suelo: el borde derecho sigue al raíl izquierdo, el
-        // de abajo queda un poco por debajo de la línea de golpeo y el alto sale de mantener la proporción
+        // lienzo plano (width x height) proyectado sobre el suelo: el borde de dentro sigue al raíl, el de abajo
+        // queda un poco por debajo de la línea de golpeo y el alto sale de mantener la proporción. Escrito para
+        // la izquierda; a la derecha se refleja (LayoutMirroring) pegado al otro raíl.
+        readonly property bool onRight: root.f.hudSide === "right"
+        LayoutMirroring.enabled: onRight
+        LayoutMirroring.childrenInherit: true
         readonly property real uB: -0.05
-        readonly property real lr: -0.8  // borde derecho, en carriles (el raíl acaba en -0.62)
-        readonly property real ll: Math.max(2 + (16 - root.width / 2) / (root.laneW * root.s(uB)), lr - 300 / root.laneW)
-        readonly property real wpx: (lr - ll) * root.laneW * root.s(uB)
+        readonly property real sB: root.laneW * root.s(uB)
+        readonly property real inner: onRight ? 4.8 : -0.8  // borde junto al raíl, en carriles (acaban en -0.62 / 4.62)
+        readonly property real outer: onRight ? Math.min(2 + (root.width / 2 - 16) / sB, inner + 300 / root.laneW)
+                                            : Math.max(2 + (16 - root.width / 2) / sB, inner - 300 / root.laneW)
+        readonly property real ll: onRight ? inner : outer  // carril del borde izquierdo y del derecho del lienzo
+        readonly property real lr: onRight ? outer : inner
+        readonly property real wpx: (lr - ll) * sB
         readonly property real uT: root.uAtY(root.yAt(uB) - height * wpx / width)
         readonly property color multColor: root.multColors[Math.min(3, root.f.mult - 1)]
         width: 300; height: hudCol.implicitHeight + 40
@@ -292,9 +300,9 @@ Item {
             anchors.fill: parent
             gradient: Gradient {
                 orientation: Gradient.Horizontal
-                GradientStop { position: 0; color: "transparent" }
+                GradientStop { position: hud.onRight ? 1 : 0; color: "transparent" }
                 GradientStop { position: 0.5; color: Qt.rgba(0.03, 0.03, 0.09, root.f.opacity * 0.6) }
-                GradientStop { position: 1; color: Qt.rgba(0.05, 0.05, 0.12, root.f.opacity) }
+                GradientStop { position: hud.onRight ? 0 : 1; color: Qt.rgba(0.05, 0.05, 0.12, root.f.opacity) }
             }
         }
         Rectangle {  // filo metálico, como los raíles

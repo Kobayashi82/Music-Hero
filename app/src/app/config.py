@@ -21,6 +21,7 @@ class Config:
     opacity: float = 0.95  # del fondo de la autopista
     volume: float = 1.0
     lyrics: bool = True  # letra bajo la autopista (sube la autopista para dejarle sitio)
+    hud_side: str = "left"  # marcador a la izquierda o a la derecha de la autopista
 
     @classmethod
     def load(cls) -> Config:
