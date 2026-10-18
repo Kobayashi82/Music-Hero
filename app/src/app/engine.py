@@ -37,9 +37,11 @@ def engine_command() -> tuple[list[str], dict[str, str], Path] | None:
     args = ["--queue", str(QUEUE_FILE), "--out", str(CHARTS_DIR), "--model", str(MODEL)]
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}  # el del juego no es el del generador
     if FROZEN:
-        py = ENGINE_DIR / ".venv" / "Scripts" / "python.exe"
-        if not py.exists():
+        from .installer import installed
+
+        if not installed():  # se instala la primera vez que hace falta (installer.py)
             return None
+        py = ENGINE_DIR / ".venv" / "Scripts" / "python.exe"
         return [str(py), "-m", "generator.engine", *args], env | model_env(ENGINE_DIR), ENGINE_DIR
     uv = shutil.which("uv")
     if uv is None:

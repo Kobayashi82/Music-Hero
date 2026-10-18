@@ -36,7 +36,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap, QPo
 from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QSystemTrayIcon
 
-from . import calibration, loopback, pairing, starpower, win32
+from . import calibration, installer, loopback, pairing, starpower, win32
 from .aimp import CMD_NEXT, CMD_PAUSE, CMD_PREV, PLAYING, Aimp, AimpPlayer, Track
 from .chart import DIFF_NAMES, DIFFS, Chart, find_chart
 from .config import Config
@@ -97,6 +97,9 @@ class Session(QObject):
         self.aimp_check = 0.0
         self.own_seek_until = 0.0
         self.engine = engine or EngineClient()  # genera las charts en otro proceso (engine.py)
+        self.installer = installer.EngineInstaller()  # la app instalada lo instala la primera vez que hace falta
+        self.install_asked = False  # ya se ofreció instalarlo en esta sesión (no se insiste solo)
+        self.install_seen = ""  # último estado del instalador ya atendido
         self.wanted: str | None = None  # canción sin chart que ha elegido el usuario: se juega en cuanto esté
         self.watcher = MusicWatcher()  # recorre las carpetas de música en un hilo
         self.music: list[str] = []  # todo el audio de las carpetas
@@ -387,6 +390,15 @@ class Session(QObject):
         if music is not None:
             self.music = music
             self.update_missing()
+        if self.installer.state != self.install_seen:
+            self.install_seen = self.installer.state
+            if self.installer.state == "done":
+                self.toast("Motor de generación instalado: empiezan las charts", 5)
+                self.update_missing()
+                if self.wanted:
+                    self.engine.add([self.wanted], front=True)
+            elif self.installer.state == "error":
+                self.toast(f"No se pudo instalar el motor: {self.installer.error[:150]}", 8)
         for ev in self.engine.poll():
             kind = ev.get("event")
             if kind == "done":
@@ -407,7 +419,10 @@ class Session(QObject):
         self.missing = without_chart(self.music, scan())
         self._tree = None
         if self.cfg.background and self.missing:
-            self.engine.add(self.missing)
+            if installer.needed():
+                self.offer_install()
+            else:
+                self.engine.add(self.missing)
 
     def chart_state(self, audio: str) -> str:
         """Estado de una canción sin chart: «generando», «en cola», «falló» o «sin chart»."""
@@ -420,8 +435,12 @@ class Session(QObject):
 
     def request_chart(self, audio: str, title: str) -> bool:
         """El usuario quiere esta canción: delante de la cola del motor (aunque hubiera fallado antes)."""
+        if installer.needed():
+            self.wanted = audio  # se hará en cuanto esté el motor
+            self.offer_install(force=True)
+            return False
         if not self.engine.available():
-            self.toast("No se puede generar la chart: el motor no está instalado", 6)
+            self.toast("No se puede generar la chart: no se encuentra el motor (¿falta uv?)", 6)
             return False
         self.engine.add([audio], front=True)
         self.wanted = audio
@@ -452,8 +471,38 @@ class Session(QObject):
         if self.follow and self.waiting and self.aimp_file and norm(self.aimp_file) == norm(audio):
             self.waiting = f"«{name}» no tiene chart: falló al generarla"
 
+    def offer_install(self, force: bool = False) -> None:
+        """La app instalada aún sin motor: se ofrece instalarlo (una vez por sesión, salvo si lo pide el usuario)."""
+        if self.installer.state == "running":
+            self.toast(f"Instalando el motor: {self.installer.step}", 4)
+            return
+        if self.install_asked and not force:
+            return
+        self.install_asked = True
+        drv = installer.driver_version()
+        gpu = drv is not None and drv >= installer.MIN_DRIVER
+        size = installer.SIZE_GB["cuda" if gpu else "cpu"]
+
+        def go() -> None:
+            self.installer.start()
+            self.menu_back()
+            self.toast("Instalando el motor de generación: puedes seguir jugando mientras", 5)
+        body = (f"Para hacer las charts, Music Hero necesita su motor de generación (separar instrumentos, ritmo, "
+                f"notas y letra). Se descarga una sola vez: unos {size} GB a %LOCALAPPDATA%\\MusicHero.<br>")
+        body += ("Tienes una tarjeta NVIDIA: cada canción tardará un minuto más o menos." if gpu else
+                 "Sin tarjeta NVIDIA (o con el driver antiguo) cada canción tardará varios minutos."
+                 + (" Con el driver de NVIDIA al día iría mucho más rápido." if drv is not None else ""))
+        if self.menus and self.menus[-1].title == "Instalar el motor":
+            return
+        self.menus.append(Menu("Instalar el motor", [Option("Instalar ahora", go), Option("Más tarde", self.menu_back)],
+                               body=body))
+
     def library_line(self) -> str:
         """Una línea con lo que está haciendo el motor (Ajustes → Biblioteca, el icono de la bandeja)."""
+        if self.installer.state == "running":
+            return f"instalando el motor ({round(self.installer.done * 100)} %): {self.installer.step}"
+        if installer.needed():
+            return "falta instalar el motor de generación"
         st = self.engine.state
         if st.current:
             line = f"generando «{Path(st.current).stem}» ({round(st.done * 100)} %)"
@@ -482,6 +531,8 @@ class Session(QObject):
                  for d in cfg.library_dirs]
         opts.append(Option("Generar en segundo plano", value=lambda: "Sí" if cfg.background else "No",
                            change=cycler([False, True], lambda: cfg.background, set_background)))
+        if installer.needed():
+            opts.append(Option("Instalar el motor", lambda: self.offer_install(force=True)))
         opts.append(Option("Reintentar las que fallaron", self.engine.retry))
         opts.append(Option("Volver", self.menu_back))
         return Menu("Biblioteca", opts, body=self.library_body)
@@ -498,6 +549,8 @@ class Session(QObject):
             lines.append("Sin tarjeta NVIDIA: cada canción tarda varios minutos")
         if st.error:
             lines.append(st.error)
+        if self.installer.state == "error":
+            lines.append(f"La instalación del motor falló: {self.installer.error[:200]} (se puede repetir)")
         return "<br>".join(lines)
 
     def folder_menu(self, folder: str) -> Menu:
