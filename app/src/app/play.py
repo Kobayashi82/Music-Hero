@@ -1198,10 +1198,10 @@ class Session(QObject):
             self.player.play()
         connected = self.inputs.guitar.connected
         if connected != self.guitar_connected:
-            if connected:
-                self.toast(t("Guitarra conectada"))
-            elif self.guitar_connected or self.guitar_connected is None:
-                self.toast(t("Sin guitarra: enciende el Wiimote y se conecta sola (o juega con el teclado)"), 6)
+            if self.guitar_connected is not None:  # al abrir no se avisa: solo si cambia mientras está abierto
+                self.toast(t("Guitarra conectada") if connected else
+                           t("Sin guitarra: enciende el Wiimote y se conecta sola (o juega con el teclado)"),
+                           TOAST_S if connected else 6)
             self.guitar_connected = connected
         self.handle_inputs()
         text = bool(self.menus) and isinstance(self.menus[-1], SearchMenu) and not self.calib
