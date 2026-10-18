@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from .audio import load_mono
+from .i18n import t
 
 BEAT_SR = 22050
 
@@ -42,7 +43,7 @@ class TempoMap:
     def from_beats(cls, beats_ms: list[int], downbeats_ms: list[int]) -> "TempoMap":
         beats = sorted(set(beats_ms))
         if len(beats) < 4:
-            raise ValueError("demasiados pocos pulsos detectados para un mapa de tempo")
+            raise ValueError(t("demasiados pocos pulsos detectados para un mapa de tempo"))
         interval = float(np.median(np.diff(beats)))
         while beats and beats[0] < 0.5 * interval:
             beats.pop(0)

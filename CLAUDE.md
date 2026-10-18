@@ -8,6 +8,7 @@ Ver ROADMAP.md para fases y criterios de terminado.
 - El formato de chart está en shared/chart_schema.json; cualquier cambio, versión nueva.
 - Tiempos siempre en milisegundos (int) desde el inicio del audio.
 - Nada de dependencias en app/ que arrastren torch o tensorflow.
+- Español e inglés: todo texto que vea el usuario (pantalla, consola, logs, errores) va con `t("texto en español", campo=...)` (o `N_()` en constantes, `bridge.tr()` en QML) y su traducción en `lang_en.py` (app/src/app/ y generator/src/generator/); los tests de i18n avisan si falta. El idioma: Ajustes → Idioma (auto = el de Windows); la app se lo pasa al motor con MUSICHERO_LANG. Las herramientas de entrenamiento (learn/, tools/) quedan en español.
 - Cada fase acaba con su criterio de terminado comprobado; no adelantar fases.
 - Probar en Windows real: overlay, SMTC y mando no se pueden simular.
 - Git: push siempre a `main` (https://github.com/Kobayashi82/Music-Hero).

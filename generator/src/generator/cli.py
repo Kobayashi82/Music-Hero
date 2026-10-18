@@ -27,6 +27,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from . import __version__
+from .i18n import t
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUT = ROOT / "out" / "charts"
@@ -49,12 +50,12 @@ def find_audio(paths: list[str]) -> list[Path]:
     out = []
     for raw in paths:
         if not str(raw).strip():
-            raise ValueError("ruta vacía")
+            raise ValueError(t("ruta vacía"))
         p = Path(raw)
         if not p.exists():
-            raise ValueError(f"no existe: {p}")
+            raise ValueError(t("no existe: {path}", path=p))
         if p.is_file() and p.suffix.lower() not in AUDIO_EXT:
-            raise ValueError(f"no es un archivo de audio: {p}")
+            raise ValueError(t("no es un archivo de audio: {path}", path=p))
         if p.is_dir():
             out += sorted(f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in AUDIO_EXT)
         else:
@@ -170,9 +171,9 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     version = generator_version(model_path, human_chart, max_nps)
     out = out_dir or out_dir_for(audio, song.audio_sha256, out_root)
     if not force and up_to_date(out, song.audio_sha256, version, clonehero):
-        print(f"{tag}{audio.name}: ya hecha ({out.name})", flush=True)
+        print(f"{tag}{audio.name}: " + t("ya hecha ({folder})", folder=out.name), flush=True)
         if lyrics:
-            step("letra", 0.8)
+            step(t("letra"), 0.8)
             _lyrics(out, device, drop_stems, step)
         return None
     print(f"{tag}{song.artist} - {song.title}  ({song.duration_ms / 1000:.0f} s)", flush=True)
@@ -187,20 +188,20 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     from .transcribe import transcribe
 
     out.mkdir(parents=True, exist_ok=True)
-    step("separando pistas", 0.02)
+    step(t("separando pistas"), 0.02)
     stems = separate(audio, out / "stems", device)
-    step("pistas separadas (Demucs htdemucs_6s)", 0.4)
+    step(t("pistas separadas (Demucs htdemucs_6s)"), 0.4)
 
     beats, downbeats = detect_beats(audio, device)
     if len(set(beats)) < 4:
         beats, downbeats = steady_beats(song.duration_ms)
-        step("sin pulsos claros: rejilla fija de 120 BPM")
+        step(t("sin pulsos claros: rejilla fija de 120 BPM"))
     tempo = TempoMap.from_beats(beats, downbeats)
-    step(f"{len(beats)} pulsos, {len(downbeats)} compases, ~{tempo.bpm_at(len(beats) / 2):.0f} BPM, "
-         f"{tempo.beats_per_measure}/4", 0.45)
+    step(t("{beats} pulsos, {bars} compases, ~{bpm:.0f} BPM, {sig}/4", beats=len(beats), bars=len(downbeats),
+           bpm=tempo.bpm_at(len(beats) / 2), sig=tempo.beats_per_measure), 0.45)
 
     trans = {s: transcribe(stems[s], s) for s in MELODIC_STEMS}
-    step("notas: " + ", ".join(f"{s} {len(t.notes)}" for s, t in trans.items()), 0.55)
+    step(t("notas: {list}", list=", ".join(f"{s} {len(tr.notes)}" for s, tr in trans.items())), 0.55)
 
     feel = analyze(audio, stems["drums"])
     end_beat = tempo.ms_to_beat(song.duration_ms)
@@ -209,7 +210,7 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
         params.max_nps.update(max_nps)
     notes, sections, source = map_expert(trans, tempo, end_beat, params, feel=feel)
     energy = sum(s.energy for s in sections) / max(1, len(sections))
-    step(f"chart Experto: {len(notes)} notas, energía media {energy:.2f}")
+    step(t("chart Experto: {n} notas, energía media {energy:.2f}", n=len(notes), energy=energy))
     difficulties = {"expert": notes}
 
     if model_path is not None:
@@ -219,7 +220,8 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
         probs = predict(audio, model_path, device, guitar=stems["guitar"])
         difficulties = map_from_model(trans, tempo, sections, probs, params)
         notes = difficulties["expert"]
-        step(f"modelo {model_path.name}: " + ", ".join(f"{d} {len(n)}" for d, n in difficulties.items()), 0.65)
+        step(t("modelo {name}: {list}", name=model_path.name,
+               list=", ".join(f"{d} {len(n)}" for d, n in difficulties.items())), 0.65)
 
     star_power: dict[str, list[tuple[int, int]]] = {}  # las de la chart humana; sin ellas, el juego las pone
     if human_chart is not None:
@@ -228,19 +230,19 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
         hc = human.load(human_chart)
         alignment = human.align(hc.audio_files, audio)
         offs = alignment.offsets()
-        sync = (f"{hc.name} ({hc.charter}), anclas afinadas {alignment.confidence:.0%}, "
-                f"desfase {offs.min() / 1000:+.2f}..{offs.max() / 1000:+.2f} s")
+        sync = t("{name} ({charter}), anclas afinadas {conf:.0%}, desfase {lo:+.2f}..{hi:+.2f} s", name=hc.name,
+                 charter=hc.charter, conf=alignment.confidence, lo=offs.min() / 1000, hi=offs.max() / 1000)
         doubtful = alignment.confidence < DOUBTFUL_HUMAN[0] and (offs.max() - offs.min()) / 1000 > DOUBTFUL_HUMAN[1]
         if (alignment.confidence < MIN_HUMAN_CONFIDENCE or doubtful) and len(difficulties) == 4:
-            step(f"chart humana descartada, no encaja con el audio: {sync}", 0.72)
+            step(t("chart humana descartada, no encaja con el audio: {sync}", sync=sync), 0.72)
         else:
             shifted = {d: n for d, n in human.shift(hc.difficulties, alignment, tempo).items() if n}
             star_power = {d: ph for d, ph in human.shift_star_power(hc.star_power, alignment).items() if d in shifted}
             filled = [d for d in difficulties if d not in shifted]
             difficulties = {d: shifted.get(d) or difficulties[d] for d in ("expert", "hard", "medium", "easy")
                             if d in shifted or d in difficulties}
-            step(f"chart humana: {sync}: " + ", ".join(f"{d} {len(n)}" for d, n in shifted.items())
-                 + (f"; del modelo: {', '.join(filled)}" if filled else ""), 0.72)
+            step(t("chart humana: {sync}: {list}", sync=sync, list=", ".join(f"{d} {len(n)}" for d, n in shifted.items()))
+                 + ("; " + t("del modelo: {list}", list=", ".join(filled)) if filled else ""), 0.72)
             notes = difficulties.get("expert", notes)
 
     data = chart_json(song, tempo, difficulties, sections, version, star_power=star_power)
@@ -249,11 +251,11 @@ def generate(audio: Path, out_root: Path, clonehero: bool = False, device: str =
     if clonehero:
         write_clonehero(out / "clonehero", song, tempo, difficulties, sections, star_power=star_power)
     if lyrics:
-        step("chart lista; letra", 0.8)
+        step(t("chart lista; letra"), 0.8)
         _lyrics(out, device, False, step)
     if drop_stems:
         shutil.rmtree(out / "stems", ignore_errors=True)
-    step(f"listo: {out}", 1.0)
+    step(t("listo: {folder}", folder=out), 1.0)
     return out
 
 
@@ -264,10 +266,10 @@ def _lyrics(out: Path, device: str, drop_stems: bool, step) -> None:
     try:
         d = lyrics_for(out, device)
     except Exception as e:  # noqa: BLE001 - p. ej. LRCLIB caído: se hará en otra pasada
-        step(f"letra: error {type(e).__name__}: {e}")
+        step(t("letra: error {err}", err=f"{type(e).__name__}: {e}"))
         return
     if d is not None:
-        step(f"letra: {d['source']}, {len(d['lines'])} líneas")
+        step(t("letra: {source}, {n} líneas", source=d["source"], n=len(d["lines"])))
         if drop_stems:  # los stems se habían vuelto a separar solo para la letra
             shutil.rmtree(out / "stems", ignore_errors=True)
 
@@ -290,38 +292,43 @@ def parse_max_nps(text: str) -> dict[str, float]:
     for part in filter(None, (p.strip() for p in text.split(","))):
         k, v = part.split("=")
         if k not in ("expert", "hard", "medium", "easy"):
-            raise ValueError(f"dificultad desconocida: {k}")
+            raise ValueError(t("dificultad desconocida: {name}", name=k))
         out[k] = float(v)
     return out
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("audio", nargs="+", help="canciones o carpetas")
-    parser.add_argument("-o", "--out", type=Path, default=DEFAULT_OUT, help=f"carpeta de salida (por defecto {DEFAULT_OUT})")
-    parser.add_argument("--clonehero", action="store_true", help="exporta también notes.chart + song.ini + audio")
-    parser.add_argument("--cpu", action="store_true", help="sin GPU")
-    parser.add_argument("--human", type=Path, help="chart hecha por personas (.sng o carpeta) para sincronizar y usar")
+    parser = argparse.ArgumentParser(description=t("generate: hace la chart (chart.json, preview.html, letra) de "
+                                                   "cada canción en out/charts/<canción>/."),
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("audio", nargs="+", help=t("canciones o carpetas"))
+    parser.add_argument("-o", "--out", type=Path, default=DEFAULT_OUT,
+                        help=t("carpeta de salida (por defecto {folder})", folder=DEFAULT_OUT))
+    parser.add_argument("--clonehero", action="store_true", help=t("exporta también notes.chart + song.ini + audio"))
+    parser.add_argument("--cpu", action="store_true", help=t("sin GPU"))
+    parser.add_argument("--human", type=Path, help=t("chart hecha por personas (.sng o carpeta) para sincronizar y usar"))
     parser.add_argument("--no-human", action="store_true",
-                        help=f"no usar las charts humanas de la biblioteca ({LIBRARY_JSON.name}, bajadas en out/encore/)")
+                        help=t("no usar las charts humanas de la biblioteca ({file}, bajadas en out/encore/)",
+                               file=LIBRARY_JSON.name))
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL,
-                        help=f"modelo entrenado para las 4 dificultades (por defecto {DEFAULT_MODEL.name})")
-    parser.add_argument("--no-model", action="store_true", help="sin modelo: reglas, solo Experto")
-    parser.add_argument("--force", action="store_true", help="rehacer aunque ya esté hecha")
-    parser.add_argument("--jobs", type=int, default=1, help="canciones a la vez (cada una en un proceso; 2 va bien en 12 GB)")
+                        help=t("modelo entrenado para las 4 dificultades (por defecto {name})", name=DEFAULT_MODEL.name))
+    parser.add_argument("--no-model", action="store_true", help=t("sin modelo: reglas, solo Experto"))
+    parser.add_argument("--force", action="store_true", help=t("rehacer aunque ya esté hecha"))
+    parser.add_argument("--jobs", type=int, default=1,
+                        help=t("canciones a la vez (cada una en un proceso; 2 va bien en 12 GB)"))
     parser.add_argument("--max-nps", type=parse_max_nps, default={},
-                        help="notas/s como mucho en 2 s, p. ej. 'expert=14,hard=8,medium=5,easy=3.5'")
-    parser.add_argument("--max-minutes", type=float, help="saltar las canciones que duren más de esto")
-    parser.add_argument("--drop-stems", action="store_true", help="borrar los stems al terminar cada canción")
-    parser.add_argument("--no-lyrics", action="store_true", help="sin letra sincronizada (lyrics.json)")
+                        help=t("notas/s como mucho en 2 s, p. ej. 'expert=14,hard=8,medium=5,easy=3.5'"))
+    parser.add_argument("--max-minutes", type=float, help=t("saltar las canciones que duren más de esto"))
+    parser.add_argument("--drop-stems", action="store_true", help=t("borrar los stems al terminar cada canción"))
+    parser.add_argument("--no-lyrics", action="store_true", help=t("sin letra sincronizada (lyrics.json)"))
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
     model = None if args.no_model else args.model
     if model is not None and not model.exists():
         if args.model != DEFAULT_MODEL:
-            parser.error(f"no existe el modelo {model}")
-        print(f"aviso: no hay {DEFAULT_MODEL}; se usan las reglas (solo Experto)")
+            parser.error(t("no existe el modelo {path}", path=model))
+        print(t("aviso: no hay {path}; se usan las reglas (solo Experto)", path=DEFAULT_MODEL))
         model = None
     try:
         files = find_audio(args.audio)
@@ -330,10 +337,11 @@ def main() -> int:
     if args.max_minutes:
         long_ = set(too_long(files, args.max_minutes))
         if long_:
-            print(f"se saltan {len(long_)} de más de {args.max_minutes:g} min: " + ", ".join(f.name for f in sorted(long_)))
+            print(t("se saltan {n} de más de {mins:g} min: {list}", n=len(long_), mins=args.max_minutes,
+                    list=", ".join(f.name for f in sorted(long_))))
         files = [f for f in files if f not in long_]
     if not files:
-        parser.error("no hay archivos de audio")
+        parser.error(t("no hay archivos de audio"))
     common = dict(out_root=args.out, clonehero=args.clonehero, device="cpu" if args.cpu else "cuda",
                   human_chart=args.human, model_path=model, force=args.force, max_nps=args.max_nps,
                   drop_stems=args.drop_stems, use_library=not args.no_human, lyrics=not args.no_lyrics)
@@ -341,7 +349,8 @@ def main() -> int:
         generate(files[0], **common)
         return 0
 
-    print(f"{len(files)} canciones, {args.jobs} a la vez, modelo: {model.name if model else 'ninguno (reglas)'}")
+    print(t("{n} canciones, {jobs} a la vez, modelo: {model}", n=len(files), jobs=args.jobs,
+            model=model.name if model else t("ninguno (reglas)")))
     t0, results = time.perf_counter(), []
     plan = plan_out_dirs(files, args.out)
     jobs = [dict(common, audio=f, out_dir=plan[f], tag=f"[{i + 1}/{len(files)}] ") for i, f in enumerate(files)]
@@ -354,7 +363,8 @@ def main() -> int:
     done = sum(s == "hecha" for _, s, _ in results)
     skipped = sum(s == "saltada" for _, s, _ in results)
     errors = [(f, s) for f, s, _ in results if s.startswith("error")]
-    print(f"\nFin en {(time.perf_counter() - t0) / 60:.1f} min: {done} hechas, {skipped} ya estaban, {len(errors)} con error")
+    print("\n" + t("Fin en {mins:.1f} min: {done} hechas, {skipped} ya estaban, {errors} con error",
+                   mins=(time.perf_counter() - t0) / 60, done=done, skipped=skipped, errors=len(errors)))
     for f, s in errors:
         print(f"  {Path(f).name}: {s}")
     return 1 if errors else 0

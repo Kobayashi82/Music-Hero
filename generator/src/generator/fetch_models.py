@@ -21,6 +21,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from .i18n import t
+
 CHUNK = 1 << 20
 USER_AGENT = "MusicHero/0.1 (https://github.com/Kobayashi82/Music-Hero)"
 
@@ -100,13 +102,13 @@ def download(m: ModelFile, emit) -> None:
                     last = pct
     if m.sha256_prefix and not _sha256(part).startswith(m.sha256_prefix):
         part.unlink()
-        raise OSError(f"{m.name}: el archivo bajado no es el que debería (hash); se bajará otra vez")
+        raise OSError(t("{name}: el archivo bajado no es el que debería (hash); se bajará otra vez", name=m.name))
     os.replace(part, m.path)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--check", action="store_true", help="solo decir qué falta")
+    parser.add_argument("--check", action="store_true", help=t("solo decir qué falta"))
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 

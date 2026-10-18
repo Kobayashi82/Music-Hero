@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .i18n import t
 from .model import ChartNote
 
 DIFFS = ("expert", "hard", "medium", "easy")
@@ -243,7 +244,7 @@ def load(path: Path) -> HumanChart:
         phrases = mid_star_power(folder / "notes.mid")
         star = {d: list(phrases) for d in diffs} if phrases else {}
     else:
-        raise FileNotFoundError(f"no hay notes.chart ni notes.mid en {folder}")
+        raise FileNotFoundError(t("no hay notes.chart ni notes.mid en {folder}", folder=folder))
     # delay del song.ini (ms): el audio va adelantado/retrasado respecto a la chart
     delay = int(float(ini.get("delay", 0) or 0))
     if delay:

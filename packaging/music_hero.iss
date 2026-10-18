@@ -1,4 +1,4 @@
-; Instalador de Music Hero (Inno Setup 6). Lo compila packaging/build.py después de PyInstaller.
+﻿; Instalador de Music Hero (Inno Setup 6). Lo compila packaging/build.py después de PyInstaller.
 ; Sin permisos de administrador: va a %LOCALAPPDATA%\Programs\Music Hero. El motor de generación no va aquí: la app
 ; lo instala la primera vez que hace falta en %LOCALAPPDATA%\MusicHero\engine (app/installer.py).
 
@@ -22,6 +22,7 @@ UninstallDisplayIcon={app}\Music Hero.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+ShowLanguageDialog=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; la app no puede estar abierta al actualizar o desinstalar (win32.single_instance)
@@ -29,11 +30,23 @@ AppMutex=Local\MusicHero.play
 CloseApplications=yes
 
 [Languages]
+; el de Windows (español si lo es; si no, inglés), sin preguntar
+Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
 
+[CustomMessages]
+es.DesktopIcon=Icono en el escritorio
+en.DesktopIcon=Desktop icon
+es.AutoStart=Abrir Music Hero al iniciar Windows (oculto: Ctrl+Alt+H lo muestra)
+en.AutoStart=Open Music Hero when Windows starts (hidden: Ctrl+Alt+H shows it)
+es.OpenNow=Abrir Music Hero
+en.OpenNow=Open Music Hero
+es.DeleteData=¿Borrar también las charts generadas, los récords y los ajustes?%n(Si vas a volver a instalarlo, mejor no: así no hay que generarlas otra vez.)
+en.DeleteData=Also delete the generated charts, high scores and settings?%n(If you're going to install it again, better not: that way they don't have to be generated again.)
+
 [Tasks]
-Name: "desktopicon"; Description: "Icono en el escritorio"; Flags: unchecked
-Name: "autostart"; Description: "Abrir Music Hero al iniciar Windows (oculto: Ctrl+Alt+H lo muestra)"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:DesktopIcon}"; Flags: unchecked
+Name: "autostart"; Description: "{cm:AutoStart}"; Flags: unchecked
 
 [Files]
 Source: "..\build\dist\Music Hero\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -47,7 +60,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
   ValueData: """{app}\Music Hero.exe"" --hidden"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
-Filename: "{app}\Music Hero.exe"; Description: "Abrir Music Hero"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Music Hero.exe"; Description: "{cm:OpenNow}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; el motor (varios GB) se puede volver a instalar desde la app
@@ -60,9 +73,7 @@ begin
   if CurUninstallStep = usUninstall then
     RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Music Hero');
   if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
-    if MsgBox('¿Borrar también las charts generadas, los récords y los ajustes?' + #13#10 +
-              '(Si vas a volver a instalarlo, mejor no: así no hay que generarlas otra vez.)',
-              mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+    if MsgBox(CustomMessage('DeleteData'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
     begin
       DelTree(ExpandConstant('{localappdata}\MusicHero'), True, True, True);
       DelTree(ExpandConstant('{userappdata}\MusicHero'), True, True, True);

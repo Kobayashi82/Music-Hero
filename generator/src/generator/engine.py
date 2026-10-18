@@ -40,6 +40,7 @@ import time
 from pathlib import Path
 
 from . import __version__
+from .i18n import t
 
 MAX_ATTEMPTS = 2  # una canción que tumba el motor tantas veces pasa a fallidas
 
@@ -63,7 +64,7 @@ class JobQueue:
         self.current: str | None = d.get("current")
         self.attempts = int(d.get("attempts", 0))
         if self.current and self.attempts >= MAX_ATTEMPTS:  # se cayó con ella otra vez
-            self.fail(self.current, "el motor se cerró varias veces con esta canción")
+            self.fail(self.current, t("el motor se cerró varias veces con esta canción"))
 
     def save(self) -> None:
         with self._lock:
@@ -177,7 +178,7 @@ class Engine:
             self.quit = True
             return
         elif cmd != "status":
-            self.emit({"event": "error", "file": None, "message": f"orden desconocida: {cmd}"})
+            self.emit({"event": "error", "file": None, "message": t("orden desconocida: {cmd}", cmd=cmd)})
             return
         self._idle_sent = False
         self.status()
@@ -222,7 +223,7 @@ class Engine:
         try:
             audio = Path(file)
             if not audio.is_file():
-                raise FileNotFoundError(f"no existe: {file}")
+                raise FileNotFoundError(t("no existe: {path}", path=file))
             out = out_dir_for(audio, sha256_file(audio), self.out_root)
             r = self.generate(audio, self.out_root, device=self.device, model_path=self.model, out_dir=out,
                               lyrics=self.lyrics, drop_stems=not self.keep_stems,
@@ -300,7 +301,7 @@ def _read_commands(engine: Engine) -> None:
         try:
             cmd = json.loads(line)
         except ValueError:
-            engine.emit({"event": "error", "file": None, "message": f"orden que no es JSON: {line[:80]}"})
+            engine.emit({"event": "error", "file": None, "message": t("orden que no es JSON: {line}", line=line[:80])})
             continue
         if cmd.get("cmd") == "quit":
             engine.jobs.release()
@@ -310,13 +311,15 @@ def _read_commands(engine: Engine) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--queue", type=Path, required=True, help="archivo de la cola (se crea si no existe)")
-    parser.add_argument("--out", type=Path, required=True, help="carpeta de las charts")
-    parser.add_argument("--model", type=Path, help="modelo OnsetNet; sin él (o si no existe), las reglas")
+    parser = argparse.ArgumentParser(description=t("engine: el motor de generación que lanza la app (órdenes JSON "
+                                                   "por stdin, avisos JSON por stdout)."),
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--queue", type=Path, required=True, help=t("archivo de la cola (se crea si no existe)"))
+    parser.add_argument("--out", type=Path, required=True, help=t("carpeta de las charts"))
+    parser.add_argument("--model", type=Path, help=t("modelo OnsetNet; sin él (o si no existe), las reglas"))
     parser.add_argument("--device", default="auto", choices=("auto", "cuda", "cpu"))
     parser.add_argument("--no-lyrics", action="store_true")
-    parser.add_argument("--keep-stems", action="store_true", help="guardar las pistas de Demucs (~50 MB por canción)")
+    parser.add_argument("--keep-stems", action="store_true", help=t("guardar las pistas de Demucs (~50 MB por canción)"))
     args = parser.parse_args()
 
     out = sys.stdout
@@ -338,7 +341,7 @@ def main() -> int:
     threading.Thread(target=_read_commands, args=(engine,), daemon=True, name="órdenes").start()
     t0 = time.perf_counter()
     engine.run()
-    print(f"motor: fin tras {(time.perf_counter() - t0) / 60:.1f} min", file=sys.stderr)
+    print(t("motor: fin tras {mins:.1f} min", mins=(time.perf_counter() - t0) / 60), file=sys.stderr)
     return 0
 
 

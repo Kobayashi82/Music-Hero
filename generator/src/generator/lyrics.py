@@ -26,6 +26,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .i18n import t
+
 LYRICS_VERSION = "2"
 SCHEMA_VERSION = 1
 WHISPER_MODEL = "large-v3-turbo"
@@ -480,16 +482,18 @@ def chart_folders(targets: list[Path], charts_dir: Path = DEFAULT_CHARTS) -> lis
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("targets", nargs="*", type=Path, help="canciones, carpetas de música o de chart")
-    parser.add_argument("--force", action="store_true", help="rehacer aunque ya esté")
-    parser.add_argument("--no-whisper", action="store_true", help="solo LRCLIB (sin transcribir las que no tengan)")
+    parser = argparse.ArgumentParser(description=t("lyrics: letra sincronizada (lyrics.json) de las charts; sin "
+                                                   "nada, todas las de out/charts."),
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("targets", nargs="*", type=Path, help=t("canciones, carpetas de música o de chart"))
+    parser.add_argument("--force", action="store_true", help=t("rehacer aunque ya esté"))
+    parser.add_argument("--no-whisper", action="store_true", help=t("solo LRCLIB (sin transcribir las que no tengan)"))
     parser.add_argument("--cpu", action="store_true")
     sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     args = parser.parse_args()
     folders = chart_folders(args.targets)
     if not folders:
-        print("No encuentro charts para eso.")
+        print(t("No encuentro charts para eso."))
         return 1
     device = "cpu" if args.cpu else "cuda"
     t0 = time.perf_counter()
@@ -502,14 +506,16 @@ def main() -> int:
             counts["error"] = counts.get("error", 0) + 1
             continue
         if d is None:
-            counts["ya estaba"] = counts.get("ya estaba", 0) + 1
+            already = t("ya estaba")
+            counts[already] = counts.get(already, 0) + 1
             continue
         counts[d["source"]] = counts.get(d["source"], 0) + 1
         n = sum(len(line["words"]) for line in d["lines"])
-        extra = f", confianza {d['confidence']:.2f}" if "confidence" in d else ""
+        extra = ", " + t("confianza {c:.2f}", c=d["confidence"]) if "confidence" in d else ""
         print(f"[{i}/{len(folders)}] {folder.name}: {d['source']} ({d.get('language', '-')}), "
-              f"{len(d['lines'])} líneas, {n} palabras{extra}", flush=True)
-    print(f"Fin en {(time.perf_counter() - t0) / 60:.1f} min: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+              + t("{lines} líneas, {words} palabras", lines=len(d["lines"]), words=n) + extra, flush=True)
+    print(t("Fin en {mins:.1f} min: {counts}", mins=(time.perf_counter() - t0) / 60,
+            counts=", ".join(f"{k} {v}" for k, v in counts.items())))
     return 0
 
 
