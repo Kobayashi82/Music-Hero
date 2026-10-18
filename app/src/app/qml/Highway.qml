@@ -14,7 +14,7 @@ Item {
                        score: 0, streak: 0, mult: 1, accuracy: 1, title: "", difficulty: "", message: "",
                        progress: 0, countdown: 0, menu: ({}), menuHint: "", calib: ({}), toast: "",
                        opacity: 0.85, missFlash: 0, missLane: [0, 0, 0, 0, 0], burn: [false, false, false, false, false],
-                       time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560, hudSide: "left",
+                       time: 0, autoplay: false, best: 0, partial: false, hwWidth: 560, hudSide: "right",
                        lyricsOn: false, lyrics: ({}) })
     readonly property var colors: ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
     readonly property var multColors: ["white", "#ffdc00", "#2ecc40", "#c86cff"]
