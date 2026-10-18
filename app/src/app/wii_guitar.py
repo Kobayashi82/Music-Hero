@@ -19,6 +19,7 @@ No necesita foco: se lee el dispositivo, no eventos de ventana.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 import hid
@@ -68,6 +69,7 @@ class WiiGuitar:
         self.path = path
         self.extension: bytes | None = None
         self._whammy_rest: int | None = None
+        self._setup_at = 0.0
 
     @classmethod
     def find(cls) -> list[dict]:
@@ -93,25 +95,42 @@ class WiiGuitar:
     def _write(self, *data: int) -> None:
         self.dev.write(bytes(data))
 
-    def _write_register(self, addr: int, value: int) -> None:
-        payload = [value] + [0] * 15
-        self._write(0x16, 0x04, addr >> 16 & 0xFF, addr >> 8 & 0xFF, addr & 0xFF, 1, *payload)
-
-    def _read_register(self, addr: int, size: int, timeout_ms: int = 500) -> bytes | None:
-        self._write(0x17, 0x04, addr >> 16 & 0xFF, addr >> 8 & 0xFF, addr & 0xFF, size >> 8 & 0xFF, size & 0xFF)
-        for _ in range(20):
-            r = self.dev.read(22, timeout_ms)
-            if r and r[0] == 0x21:  # respuesta de lectura: botones (2), tamaño/error, dirección (2), 16 de datos
-                if r[3] & 0x0F:
-                    return None
-                return bytes(r[6:6 + size])
+    def _wait(self, report: int, ack_of: int | None = None, timeout_s: float = 0.5) -> list[int] | None:
+        """Espera un informe concreto, por tiempo y no por número: los informes continuos no lo tapan."""
+        end = time.monotonic() + timeout_s
+        while (left := end - time.monotonic()) > 0:
+            r = self.dev.read(22, max(1, int(left * 1000)))
+            if r and r[0] == report and (ack_of is None or r[3] == ack_of):
+                return r
         return None
 
-    def setup_extension(self) -> None:
-        self._write_register(0xA400F0, 0x55)
-        self._write_register(0xA400FB, 0x00)
-        self.extension = self._read_register(0xA400FA, 6)
+    def _write_register(self, addr: int, value: int) -> bool:
+        payload = [value] + [0] * 15
+        self._write(0x16, 0x04, addr >> 16 & 0xFF, addr >> 8 & 0xFF, addr & 0xFF, 1, *payload)
+        r = self._wait(0x22, ack_of=0x16)  # confirmación: botones (2), informe confirmado, error
+        return r is not None and r[4] == 0
+
+    def _read_register(self, addr: int, size: int) -> bytes | None:
+        self._write(0x17, 0x04, addr >> 16 & 0xFF, addr >> 8 & 0xFF, addr & 0xFF, size >> 8 & 0xFF, size & 0xFF)
+        r = self._wait(0x21)  # respuesta de lectura: botones (2), tamaño/error, dirección (2), 16 de datos
+        if r is None or r[3] & 0x0F:
+            return None
+        return bytes(r[6:6 + size])
+
+    def setup_extension(self, tries: int = 5) -> None:
+        """Recién conectado (o con poca batería) la extensión tarda en responder: se reintenta."""
+        self._write(0x12, 0x00, 0x30)  # sin informes continuos mientras se configura
+        ext = None
+        for i in range(tries):
+            if i:
+                time.sleep(0.2)
+            if self._write_register(0xA400F0, 0x55) and self._write_register(0xA400FB, 0x00):
+                ext = self._read_register(0xA400FA, 6)
+                if ext and ext != b"\xff" * 6:
+                    break
+        self.extension = ext
         self._whammy_rest = None
+        self._setup_at = time.monotonic()
         self._write(0x12, 0x04, 0x32)  # informes continuos 0x32: botones + 8 bytes de extensión
 
     @property
@@ -123,9 +142,16 @@ class WiiGuitar:
         if not r:
             return None
         if r[0] == 0x20:  # estado: se enchufó o desenchufó la extensión
-            self.setup_extension()
+            if r[3] & 0x02:
+                self.setup_extension()
+            else:
+                self.extension = None
+                self._write(0x12, 0x04, 0x32)  # tras un estado el Wiimote deja de mandar datos
             return None
         if r[0] != 0x32:
+            return None
+        if self.extension is not None and not self.is_guitar and time.monotonic() - self._setup_at > 2:
+            self.setup_extension(tries=1)  # enchufada pero sin responder bien: otra vez cada 2 s
             return None
         ext = bytes(r[3:9])
         if self._whammy_rest is None:  # la palanca en reposo no da 0: se toma la primera lectura
