@@ -30,6 +30,8 @@ user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize
 user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                 ctypes.c_uint]
 user32.GetAsyncKeyState.restype = ctypes.c_short
+user32.VkKeyScanW.restype = ctypes.c_short
+user32.VkKeyScanW.argtypes = [wintypes.WCHAR]
 user32.PeekMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint]
 user32.PostThreadMessageW.argtypes = [wintypes.DWORD, ctypes.c_uint, wintypes.WPARAM, wintypes.LPARAM]
 
@@ -43,6 +45,12 @@ def vk_of(key: str) -> int:
     if key.startswith("f") and key[1:].isdigit() and 1 <= int(key[1:]) <= 24:
         return 0x70 + int(key[1:]) - 1
     raise ValueError(f"tecla no reconocida: {key!r}")
+
+
+def vk_of_char(c: str) -> int | None:
+    """Tecla virtual que escribe c sin modificadores con la distribución actual (la ñ incluida); None si no hay."""
+    r = user32.VkKeyScanW(c)
+    return r & 0xFF if r != -1 and not r >> 8 & 0xFF else None
 
 
 def parse_hotkey(text: str) -> tuple[int, int]:

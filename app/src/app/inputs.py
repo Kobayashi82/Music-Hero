@@ -8,6 +8,7 @@ Teclado, con el juego activo (las teclas no llegan a la app que tenga el foco):
     flechas arriba/abajo, Intro   strum (en los menús: mover; Intro elige)
     Espacio            menú (pausa)   Retroceso   reiniciar la canción (en los menús: volver)
     Tab                cambiar de dificultad sin parar la canción
+En el buscador, letras, números y Espacio escriben (los trastes siguen en la guitarra).
 Siempre: Ctrl+Alt+H mostrar/ocultar (oculto = pausa y teclado libre), Ctrl+Alt+Q salir.
 Guitarra: + menú (pausa), − cambiar de dificultad; en los menús, strum mover, verde o + elegir,
 rojo o − volver. Si la guitarra se apaga o se enciende más tarde, se reconecta sola.
@@ -27,14 +28,15 @@ from . import win32
 FRET_KEYS = ("a", "s", "d", "f", "g")
 STRUM_KEYS = ("up", "down")
 CONTROL_KEYS = {"space": "pause", "backspace": "restart", "tab": "difficulty", "enter": "enter"}
+TEXT_CHARS = "abcdefghijklmnñopqrstuvwxyz0123456789 "
 GLOBAL_HOTKEYS = {"toggle": "ctrl+alt+h", "quit": "ctrl+alt+q"}
 
 
 @dataclass
 class InputEvent:
     t: float  # time.perf_counter()
-    kind: str  # "fret" | "strum" | "control"
-    value: int | str = 0  # traste 0..4, dirección del strum (-1 arriba, 1 abajo) o nombre del control
+    kind: str  # "fret" | "strum" | "control" | "char"
+    value: int | str = 0  # traste 0..4, dirección del strum (-1 arriba, 1 abajo), nombre del control o letra
     down: bool = True
 
 
@@ -57,6 +59,9 @@ class Inputs:
     def set_game_keys(self, enabled: bool) -> None:
         self.keyboard.set_game_keys(enabled)
 
+    def set_text_mode(self, enabled: bool) -> None:
+        self.keyboard.set_text_mode(enabled)
+
     def drain(self) -> list[InputEvent]:
         out = []
         while True:
@@ -70,6 +75,7 @@ class KeyboardSource:
     """Atajos globales en un hilo con su bucle de mensajes; las sueltas se leen con GetAsyncKeyState."""
 
     _SET_GAME_KEYS = win32.WM_APP + 1
+    _SET_TEXT_MODE = win32.WM_APP + 2
 
     def __init__(self, events: queue.SimpleQueue, hotkeys: dict[str, str]):
         self.events = events
@@ -77,6 +83,8 @@ class KeyboardSource:
         self.errors: list[str] = []
         self._ids: dict[int, tuple[str, int | str, int]] = {}  # id -> (tipo, valor, tecla virtual)
         self._thread_id = 0
+        self._game = False
+        self._text = False
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True, name="teclado")
 
@@ -92,19 +100,29 @@ class KeyboardSource:
     def set_game_keys(self, enabled: bool) -> None:
         win32.user32.PostThreadMessageW(self._thread_id, self._SET_GAME_KEYS, int(enabled), 0)
 
-    def _register_game_keys(self, enabled: bool) -> None:
-        game = {100 + i: ("fret", i, win32.vk_of(k)) for i, k in enumerate(FRET_KEYS)}
-        game |= {110 + i: ("strum", -1 if k == "up" else 1, win32.vk_of(k)) for i, k in enumerate(STRUM_KEYS)}
-        game |= {120 + i: ("control", name, win32.vk_of(k)) for i, (k, name) in enumerate(CONTROL_KEYS.items())}
-        for hk_id, (kind, value, vk) in game.items():
-            if enabled:
-                if win32.user32.RegisterHotKey(None, hk_id, win32.MOD_NOREPEAT, vk):
-                    self._ids[hk_id] = (kind, value, vk)
-                else:
-                    self.errors.append(f"la tecla {value!r} ya la usa otra aplicación")
-            elif hk_id in self._ids:
-                win32.user32.UnregisterHotKey(None, hk_id)
-                del self._ids[hk_id]
+    def set_text_mode(self, enabled: bool) -> None:
+        """Buscador: las letras (A S D F G incluidas) y Espacio escriben en vez de tocar o pausar."""
+        win32.user32.PostThreadMessageW(self._thread_id, self._SET_TEXT_MODE, int(enabled), 0)
+
+    def _sync_keys(self) -> None:
+        """Registra las teclas del juego (y las de escribir en modo texto) según el estado."""
+        for hk_id in [i for i in self._ids if i >= 100]:
+            win32.user32.UnregisterHotKey(None, hk_id)
+            del self._ids[hk_id]
+        if not self._game:
+            return
+        keys = {110 + i: ("strum", -1 if k == "up" else 1, win32.vk_of(k)) for i, k in enumerate(STRUM_KEYS)}
+        keys |= {120 + i: ("control", name, win32.vk_of(k)) for i, (k, name) in enumerate(CONTROL_KEYS.items())
+                 if not (self._text and k == "space")}
+        if self._text:
+            keys |= {200 + i: ("char", c, vk) for i, c in enumerate(TEXT_CHARS) if (vk := win32.vk_of_char(c))}
+        else:
+            keys |= {100 + i: ("fret", i, win32.vk_of(k)) for i, k in enumerate(FRET_KEYS)}
+        for hk_id, (kind, value, vk) in keys.items():
+            if win32.user32.RegisterHotKey(None, hk_id, win32.MOD_NOREPEAT, vk):
+                self._ids[hk_id] = (kind, value, vk)
+            elif kind != "char":
+                self.errors.append(f"la tecla {value!r} ya la usa otra aplicación")
 
     def _run(self) -> None:
         self._thread_id = win32.kernel32.GetCurrentThreadId()
@@ -125,9 +143,15 @@ class KeyboardSource:
                     now = time.perf_counter()
                     if msg.message == win32.WM_QUIT:
                         return
-                    if msg.message == self._SET_GAME_KEYS:
-                        self._register_game_keys(bool(msg.wParam))
+                    if msg.message in (self._SET_GAME_KEYS, self._SET_TEXT_MODE):
+                        if msg.message == self._SET_GAME_KEYS:
+                            self._game = bool(msg.wParam)
+                        else:
+                            self._text = bool(msg.wParam)
+                        for fret in held.values():  # los trastes pulsados se sueltan: no se quedan pegados
+                            self.events.put(InputEvent(now, "fret", fret, False))
                         held.clear()
+                        self._sync_keys()
                     elif msg.message == win32.WM_HOTKEY and msg.wParam in self._ids:
                         kind, value, vk = self._ids[msg.wParam]
                         self.events.put(InputEvent(now, kind, value, True))

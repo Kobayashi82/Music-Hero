@@ -29,9 +29,9 @@ from .chart import DIFF_NAMES, DIFFS, Chart, find_chart
 from .config import Config
 from .gameplay import HIT, MISSED, SKIPPED, Game
 from .inputs import Inputs
-from .library import Entry, group, scan
+from .library import Entry, group, scan, search
 from .lyrics import Lyrics
-from .menu import Menu, Option, cycler, stepper
+from .menu import Menu, Option, SearchMenu, cycler, stepper
 from .player import Player
 from .records import Play, Records
 from .sprites import SpriteProvider
@@ -70,6 +70,7 @@ class Session(QObject):
         self.results = ""
         self.toast_text, self.toast_until = "", 0.0
         self.guitar_connected: bool | None = None
+        self.text_mode = False  # el teclado escribe (buscador abierto)
         self.message = "; ".join(inputs.errors)
         self.autoplay = False
         self.partial = False  # la partida no cuenta para récords (automático o empezada a mitad)
@@ -211,13 +212,13 @@ class Session(QObject):
         here = next(((a, al, i) for a, albums in tree.items() for al, songs in albums.items()
                      for i, e in enumerate(songs) if e.sha == self.chart.audio_sha256), None)
         total = sum(len(s) for albums in tree.values() for s in albums.values())
-        root = Menu("Canciones", [Option("Al azar", self.play_random)] + [
+        root = Menu("Canciones", [Option("Buscar", self.open_search), Option("Al azar", self.play_random)] + [
             Option(a, lambda a=a: self.open_artist(a), value=str(sum(len(s) for s in tree[a].values())))
             for a in tree], body=f"{total} canciones de {len(tree)} artistas")
         self.menus.append(root)
         if here:
             artist, album, i = here
-            root.sel = 1 + list(tree).index(artist)
+            root.sel = 2 + list(tree).index(artist)
             self.open_artist(artist, album, i)
 
     def open_artist(self, artist: str, album: str | None = None, song: int = 0) -> None:
@@ -238,6 +239,16 @@ class Session(QObject):
                     body=f"{artist} · {len(songs)} canciones")
         menu.sel = min(song, len(songs) - 1)
         self.menus.append(menu)
+
+    def open_search(self) -> None:
+        """Buscador por título, artista o álbum (teclado directo, o letra a letra con la guitarra)."""
+        self.pause()
+        entries = [e for albums in self.tree().values() for s in albums.values() for e in s]
+
+        def results(query: str) -> list[Option]:
+            return [Option(e.title, lambda e=e: self.choose(e), value=e.group_artist)
+                    for e in search(entries, query)]
+        self.menus.append(SearchMenu("Buscar canción", results))
 
     def choose(self, e: Entry) -> None:
         if e.sha == self.chart.audio_sha256:
@@ -266,6 +277,8 @@ class Session(QObject):
         return Menu("Pausa", [
             Option("Continuar", self.resume),
             Option("Cambiar canción", self.open_selector),
+            Option("Canción al azar", self.play_random),
+            Option("Buscar canción", self.open_search),
             self.difficulty_option(),
             self.autoplay_option(),
             Option("Reiniciar", self.restart),
@@ -278,6 +291,8 @@ class Session(QObject):
         return Menu("Fin de la canción", [
             Option("Otra vez", self.restart),
             Option("Otra canción", self.open_selector),
+            Option("Canción al azar", self.play_random),
+            Option("Buscar canción", self.open_search),
             self.difficulty_option(),
             self.autoplay_option(),
             Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
@@ -422,6 +437,13 @@ class Session(QObject):
 
     def menu_input(self, ev) -> None:
         menu = self.menus[-1]
+        if isinstance(menu, SearchMenu):
+            if ev.kind == "char":
+                menu.type(ev.value)
+                return
+            if ev.kind == "control" and ev.value == "restart" and menu.query:  # Retroceso borra
+                menu.backspace()
+                return
         if ev.kind == "strum":
             menu.move(ev.value)
         elif ev.kind == "fret" and ev.down and ev.value in (0, 1):
@@ -471,6 +493,10 @@ class Session(QObject):
                 self.toast("Sin guitarra: enciende el Wiimote y se conecta sola (o juega con el teclado)", 6)
             self.guitar_connected = connected
         self.handle_inputs()
+        text = bool(self.menus) and isinstance(self.menus[-1], SearchMenu) and not self.calib
+        if text != self.text_mode:
+            self.text_mode = text
+            self.inputs.set_text_mode(text)
         if self.calib and self.calib.finished:
             self.finish_calibration()
         t = self.player.position_ms(now)

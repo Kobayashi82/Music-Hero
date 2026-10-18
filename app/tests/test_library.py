@@ -2,8 +2,8 @@
 
 import json
 
-from app.library import NO_ALBUM, group, scan, split_prefix
-from app.menu import PAGE, WINDOW, Menu, Option
+from app.library import NO_ALBUM, group, scan, search, split_prefix
+from app.menu import PAGE, WINDOW, Menu, Option, SearchMenu
 
 
 def make_song(tmp, charts, rel: str, title: str, artist: str = "", album: str = "", sha: str = "") -> None:
@@ -52,15 +52,65 @@ def test_prefijos():
 
 def test_menu_largo_en_ventana():
     m = Menu("t", [Option(str(i), value=str(i * 2)) for i in range(40)])
-    v = m.view()
-    assert len(v["items"]) == WINDOW and not v["above"] and v["below"] and v["sel"] == 0
+    assert len(m.view()["items"]) == WINDOW
     m.page(1)
     m.page(1)
     assert m.sel == 2 * PAGE
     v = m.view()
-    assert v["items"][v["sel"]] == str(2 * PAGE) and v["above"] and v["below"] and v["position"] == "21 / 40"
+    assert v["items"][v["sel"]] == str(2 * PAGE) and v["position"] == "21 / 40"
     assert v["values"][v["sel"]] == str(4 * PAGE)  # valor fijo (texto)
-    m.page(1), m.page(1), m.page(1)
-    assert m.sel == 39 and not m.view()["below"]  # el salto no da la vuelta
-    m.move(1)
-    assert m.sel == 0  # el strum sí
+
+
+def test_menu_largo_circular():
+    m = Menu("t", [Option(str(i)) for i in range(40)])
+    v = m.view()
+    assert v["sel"] == WINDOW // 2 and v["items"][v["sel"]] == "0" and v["above"] and v["below"]
+    assert v["items"][0] == str(40 - WINDOW // 2)  # por encima de la primera, las últimas
+    assert v["wrap"] == WINDOW // 2  # y ahí vuelve a empezar
+    m.move(-1)
+    assert m.sel == 39 and m.view()["items"][WINDOW // 2 + 1] == "0"
+    m.page(1)
+    assert m.sel == PAGE - 1  # el salto también da la vuelta
+    m.page(-1)
+    assert m.sel == 39
+    assert Menu("t", [Option(str(i)) for i in range(5)]).view()["wrap"] == -1  # las cortas, como siempre
+
+
+def test_buscar(tmp_path):
+    charts = tmp_path / "charts"
+    make_song(tmp_path, charts, "Queen/Greatest Hits II/Queen - Hammer to Fall.mp3", "Hammer to Fall", "Queen")
+    make_song(tmp_path, charts, "Queen/Greatest Hits III/Under Pressure.mp3", "Under Pressure", "Queen & David Bowie")
+    make_song(tmp_path, charts, "Avril Lavigne/1 - Let Go/02 - Complicated.mp3", "Complicated", "Avril")
+    make_song(tmp_path, charts, "Rosalía/El Mal Querer/Malamente.mp3", "Malamente", "Rosalía")
+    entries = scan(charts, tmp_path / "library.json")
+    group(entries)
+    titles = lambda q: [e.title for e in search(entries, q)]  # noqa: E731
+    assert titles("under") == ["Under Pressure"]
+    assert titles("queen") == ["Hammer to Fall", "Under Pressure"]  # por artista
+    assert titles("bowie press") == ["Under Pressure"]  # todas las palabras, en cualquier campo
+    assert titles("ROSALIA") == ["Malamente"]  # sin tildes ni mayúsculas
+    assert titles("let go") == ["Complicated"]  # por álbum
+    assert titles("  ") == [] and titles("zzz") == []
+
+
+def test_menu_de_busqueda():
+    songs = ["Hammer to Fall", "Under Pressure", "Complicated"]
+    picked = []
+    m = SearchMenu("Buscar", lambda q: [Option(s, lambda s=s: picked.append(s)) for s in songs if q in s.lower()])
+    assert len(m.options) == SearchMenu.FIXED
+    m.type("u")  # teclado: queda elegido el primer resultado
+    assert m.query == "u" and m.sel == SearchMenu.FIXED and m.options[m.sel].label == "Under Pressure"
+    m.select()
+    assert picked == ["Under Pressure"]
+    m.backspace()
+    m.sel = 0
+    m.select()  # guitarra: «Escribir» se edita, el strum elige la letra y verde la añade
+    assert m.editing
+    m.move(1)  # strum abajo: la letra anterior (de la «a» da la vuelta al espacio)
+    m.move(-1), m.move(-1), m.move(-1)  # arriba: a, b, c
+    m.select()
+    assert m.query == "c" and m.editing and [o.label for o in m.options[SearchMenu.FIXED:]] == ["Complicated"]
+    assert m.back() and not m.editing
+    m.sel = 1
+    m.select()  # «Borrar letra»
+    assert m.query == "" and "Buscar:" in m.body

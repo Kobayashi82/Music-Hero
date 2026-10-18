@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -114,3 +115,26 @@ def group(entries: list[Entry]) -> dict[str, dict[str, list[Entry]]]:
         ordered = sorted(albums, key=lambda a: (albums[a][0].album_order or 10**6, a.casefold()))
         out[artist] = {a: sorted(albums[a], key=lambda e: (e.track or 10**6, e.title.casefold())) for a in ordered}
     return out
+
+
+def fold(text: str) -> str:
+    """Para buscar: sin mayúsculas ni tildes («Canción» -> «cancion»)."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
+
+
+def search(entries: list[Entry], query: str, limit: int = 50) -> list[Entry]:
+    """Canciones con todas las palabras en el título, el artista o el álbum. Primero las que empiezan por
+    lo buscado, luego las que lo tienen todo en el título y luego el resto."""
+    q = fold(query).strip()
+    words = q.split()
+    if not words:
+        return []
+    found = []
+    for e in entries:
+        title = fold(e.title)
+        hay = " ".join((title, fold(e.group_artist or e.artist), fold(e.artist), fold(e.group_album or e.album)))
+        if all(w in hay for w in words):
+            rank = 0 if title.startswith(q) else 1 if all(w in title for w in words) else 2
+            found.append((rank, title, fold(e.group_artist), e))
+    found.sort(key=lambda r: r[:3])
+    return [r[3] for r in found[:limit]]

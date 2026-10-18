@@ -267,42 +267,78 @@ Item {
         }
     }
 
-    // ---------- marcador ----------
-    Rectangle {
-        x: root.xAt(4.5, 0) + 18; y: root.strikeY - height + 30
-        width: score.implicitWidth + 32; height: score.implicitHeight + 24; radius: 10
-        color: "#e6101020"; border.color: "#40ffffff"
+    // ---------- marcador: a la izquierda, tumbado en el plano de la autopista junto al raíl ----------
+    function uAtY(y) {  // la inversa de yAt
+        var sv = 1 - (strikeY - y) * (1 - farScale) / (strikeY - horizonY)
+        return (1 / sv - 1) / k
+    }
+    Item {
+        id: hud
+        // lienzo plano (width x height) proyectado sobre el suelo: el borde derecho sigue al raíl izquierdo, el
+        // de abajo queda un poco por debajo de la línea de golpeo y el alto sale de mantener la proporción
+        readonly property real uB: -0.05
+        readonly property real lr: -0.8  // borde derecho, en carriles (el raíl acaba en -0.62)
+        readonly property real ll: Math.max(2 + (16 - root.width / 2) / (root.laneW * root.s(uB)), lr - 300 / root.laneW)
+        readonly property real wpx: (lr - ll) * root.laneW * root.s(uB)
+        readonly property real uT: root.uAtY(root.yAt(uB) - height * wpx / width)
+        readonly property color multColor: root.multColors[Math.min(3, root.f.mult - 1)]
+        width: 300; height: hudCol.implicitHeight + 40
+        transform: Matrix4x4 {
+            matrix: root.quad(hud.width, hud.height,
+                              root.xAt(hud.ll, hud.uT), root.yAt(hud.uT), root.xAt(hud.lr, hud.uT), root.yAt(hud.uT),
+                              root.xAt(hud.lr, hud.uB), root.yAt(hud.uB), root.xAt(hud.ll, hud.uB), root.yAt(hud.uB))
+        }
+        Rectangle {  // placa: oscura junto al raíl y se desvanece hacia fuera (sin bordes de caja)
+            anchors.fill: parent
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0; color: "transparent" }
+                GradientStop { position: 0.5; color: Qt.rgba(0.03, 0.03, 0.09, root.f.opacity * 0.6) }
+                GradientStop { position: 1; color: Qt.rgba(0.05, 0.05, 0.12, root.f.opacity) }
+            }
+        }
+        Rectangle {  // filo metálico, como los raíles
+            anchors.right: parent.right; width: 6; height: parent.height
+            gradient: Gradient {
+                GradientStop { position: 0; color: "#00838894" }
+                GradientStop { position: 0.35; color: "#a0596069" }
+                GradientStop { position: 1; color: "#f0a3a9b5" }
+            }
+        }
         Column {
-            id: score
-            x: 16; y: 12; spacing: 2
-            Text { text: root.fmt(root.f.score); color: "white"; font.pixelSize: 30; font.bold: true }
+            id: hudCol
+            anchors.right: parent.right; anchors.rightMargin: 22; y: 20; spacing: 2
+            Text {  // récord de la canción en esta dificultad; dorado al superarlo
+                readonly property bool beaten: root.f.best > 0 && root.f.score > root.f.best && !root.f.partial
+                anchors.right: parent.right
+                visible: root.f.best > 0
+                text: beaten ? "¡Récord! (" + root.fmt(root.f.best) + ")" : "Récord " + root.fmt(root.f.best)
+                color: beaten ? "#ffd23c" : "#99ffffff"; font.pixelSize: 16; font.bold: beaten
+            }
+            Text { anchors.right: parent.right; text: root.fmt(root.f.score); color: "white"
+                   font.pixelSize: 40; font.bold: true; style: Text.Raised; styleColor: "#80000000" }
             Row {
-                spacing: 10
-                Text { text: "x" + root.f.mult; color: root.multColors[root.f.mult - 1]
-                       font.pixelSize: 40; font.bold: true }
-                Column {  // las 10 notas para el siguiente multiplicador
-                    anchors.verticalCenter: parent.verticalCenter; spacing: 3
-                    Row {
-                        spacing: 3
-                        Repeater {
-                            model: 10
-                            Rectangle {
-                                width: 9; height: 9; radius: 4.5
-                                color: root.f.mult >= 4 || index < root.f.streak % 10 ? root.multColors[Math.min(3, root.f.mult)] : "#33ffffff"
-                            }
+                anchors.right: parent.right; spacing: 12
+                Grid {  // las 10 notas para el siguiente multiplicador
+                    anchors.verticalCenter: parent.verticalCenter; columns: 5; spacing: 4
+                    Repeater {
+                        model: 10
+                        Rectangle {
+                            width: 11; height: 11; radius: 5.5
+                            color: root.f.mult >= 4 || index < root.f.streak % 10 ? hud.multColor : "#33ffffff"
                         }
                     }
                 }
+                Text { text: "×" + root.f.mult; color: hud.multColor; font.pixelSize: 52; font.bold: true
+                       style: Text.Raised; styleColor: "#80000000" }
             }
-            Text { text: root.f.streak > 1 ? root.f.streak + " seguidas" : root.f.streak === 1 ? "1 seguida" : " "; color: "white"; font.pixelSize: 18 }
-            Text { text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty; color: "#ccffffff"; font.pixelSize: 16 }
-            Text {  // récord de la canción en esta dificultad; dorado al superarlo
-                readonly property bool beaten: root.f.best > 0 && root.f.score > root.f.best && !root.f.partial
-                visible: root.f.best > 0
-                text: beaten ? "¡Récord! (" + root.fmt(root.f.best) + ")" : "Récord " + root.fmt(root.f.best)
-                color: beaten ? "#ffd23c" : "#99ffffff"; font.pixelSize: 15; font.bold: beaten
-            }
-            Text { visible: root.f.autoplay; text: "Automático"; color: "#ffdc00"; font.pixelSize: 16; font.bold: true }
+            Text { anchors.right: parent.right
+                   text: root.f.streak > 1 ? root.f.streak + " seguidas" : root.f.streak === 1 ? "1 seguida" : " "
+                   color: "white"; font.pixelSize: 20 }
+            Text { anchors.right: parent.right; text: Math.round(root.f.accuracy * 100) + " % · " + root.f.difficulty
+                   color: "#ccffffff"; font.pixelSize: 17 }
+            Text { anchors.right: parent.right; visible: root.f.autoplay; text: "Automático"; color: "#ffdc00"
+                   font.pixelSize: 17; font.bold: true }
         }
     }
     Rectangle {  // título y progreso
@@ -380,10 +416,7 @@ Item {
                horizontalAlignment: Text.AlignHCenter }
     }
 
-    // ---------- menú ----------
-    Rectangle {
-        anchors.fill: parent; color: "#70000000"; visible: root.menuOpen
-    }
+    // ---------- menú (sin oscurecer lo de debajo: la ventana es transparente y se vería su rectángulo) ----------
     Rectangle {
         id: menuBox
         visible: root.menuOpen
@@ -408,10 +441,16 @@ Item {
                     width: menuCol.width; height: 44; radius: 8
                     color: editing ? "#402ecc40" : selected ? "#28ffffff" : "transparent"
                     border.color: selected ? (editing ? "#2ecc40" : "#90ffffff") : "transparent"; border.width: 2
+                    Rectangle {  // la lista vuelve a empezar (menús circulares)
+                        visible: index === root.f.menu.wrap
+                        x: 16; y: -4; width: parent.width - 32; height: 2; radius: 1; color: "#50ffffff"
+                    }
                     Text { x: 16; anchors.verticalCenter: parent.verticalCenter
+                           width: parent.width - 48 - valueText.implicitWidth; elide: Text.ElideRight
                            text: root.f.menu.items[index]; color: "white"; font.pixelSize: 20
                            font.bold: parent.selected }
-                    Text { anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
+                    Text { id: valueText
+                           anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
                            readonly property string v: root.f.menu.values[index]
                            text: v === "" ? "" : parent.editing ? "▲  " + v + "  ▼" : v
                            color: parent.editing ? "#2ecc40" : "#ccffffff"; font.pixelSize: 20; font.bold: parent.editing }
@@ -422,8 +461,8 @@ Item {
             Text { width: parent.width; horizontalAlignment: Text.AlignRight; visible: text !== ""
                    text: root.menuOpen ? root.f.menu.position : ""; color: "#88ffffff"; font.pixelSize: 13 }
             Text { width: parent.width; topPadding: 10; horizontalAlignment: Text.AlignHCenter
-                   text: root.menuOpen && root.f.menu.editing ? "Strum: cambiar · Verde / + o Rojo / −: listo"
-                                                              : root.f.menuHint
+                   text: root.menuOpen && root.f.menu.editing
+                         ? (root.f.menu.editHint || "Strum: cambiar · Verde / + o Rojo / −: listo") : root.f.menuHint
                    color: "#99ffffff"; font.pixelSize: 14 }
         }
     }
