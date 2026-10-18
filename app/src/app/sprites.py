@@ -116,14 +116,14 @@ def _body(face: QRectF, depth: float) -> QPainterPath:
 
 
 def _side(p: QPainter, face: QRectF, depth: float, light: QColor, dark: QColor) -> None:
-    """Canto cilíndrico: oscuro en los bordes, más claro un poco a la izquierda (luz de arriba-izquierda)."""
+    """Canto cilíndrico: claro en el centro y algo más oscuro solo en los extremos. Nada oscuro en el centro
+    de abajo: con la nota lejos (pequeña) se ve como si estuviera cortada."""
     g = QLinearGradient(face.left(), 0, face.right(), 0)
-    g.setColorAt(0, _shade(dark, 0.6))
-    g.setColorAt(0.3, light)
-    g.setColorAt(0.55, dark)
-    g.setColorAt(0.85, _shade(light, 0.8))
-    g.setColorAt(1, _shade(dark, 0.5))
-    p.setPen(QPen(QColor(0, 0, 0, 200), 1.5))
+    g.setColorAt(0, dark)
+    g.setColorAt(0.4, light)
+    g.setColorAt(0.6, light)
+    g.setColorAt(1, dark)
+    p.setPen(QPen(QColor(0, 0, 0, 90), 1.2))
     p.setBrush(QBrush(g))
     p.drawPath(_body(face, depth))
 
@@ -141,16 +141,14 @@ def _bezel(p: QPainter, r: QRectF, tint: QColor | None = None) -> None:
     g = QLinearGradient(0, r.top(), 0, r.bottom())
     if tint is None:
         g.setColorAt(0, QColor("#f4f5f8"))
-        g.setColorAt(0.25, QColor("#b9bdc7"))
-        g.setColorAt(0.55, QColor("#5d616b"))
-        g.setColorAt(0.8, QColor("#9196a1"))
-        g.setColorAt(1, QColor("#3a3d45"))
+        g.setColorAt(0.4, QColor("#c3c7d0"))
+        g.setColorAt(0.75, QColor("#959aa5"))
+        g.setColorAt(1, QColor("#7a7f8a"))
     else:
         g.setColorAt(0, _shade(tint, 1.55))
-        g.setColorAt(0.3, tint)
-        g.setColorAt(0.6, _shade(tint, 0.55))
+        g.setColorAt(0.4, tint)
         g.setColorAt(1, _shade(tint, 0.8))
-    p.setPen(QPen(QColor(0, 0, 0, 180), 1.5))
+    p.setPen(QPen(QColor(0, 0, 0, 90), 1.2))
     p.setBrush(QBrush(g))
     p.drawEllipse(r)
 
@@ -197,7 +195,7 @@ def _glass(p: QPainter, r: QRectF, col: QColor, lit: float, frosted: bool = Fals
     p.setClipPath(_ellipse(r))
     _paste(p, _soft(GEM_W, GEM_H, spec, 3), 0.6 if not frosted else 0.4)
     p.restore()
-    p.setPen(QPen(_alpha(QColor("black"), 0.45), 1.2))
+    p.setPen(QPen(_alpha(QColor("black"), 0.2), 1.0))
     p.setBrush(Qt.BrushStyle.NoBrush)
     p.drawEllipse(r)
 
@@ -219,7 +217,7 @@ def draw_gem(lane: int, kind: str) -> QImage:
     cap = FACE.adjusted(13, 7, -13, -9)
     lift = 5  # la tapa sobresale un poco del aro
     p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(_shade(col, 0.35))
+    p.setBrush(_shade(col, 0.8))
     p.drawPath(_body(cap.translated(0, -lift), lift))
     _glass(p, cap.translated(0, -lift), col, 0.0 if miss else 0.75, frosted=kind == "hopo")
     p.end()
