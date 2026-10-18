@@ -36,7 +36,8 @@ def test_clean_title():
     assert L._clean_title("Song - Remastered 2011") == "Song"
 
 
-def test_get_retries_server_errors(monkeypatch):
+def test_get_retries_server_errors_and_caches(monkeypatch, tmp_path):
+    monkeypatch.setattr(L, "CACHE_DIR", tmp_path)
     calls = []
 
     class Resp:
@@ -59,12 +60,13 @@ def test_get_retries_server_errors(monkeypatch):
     monkeypatch.setattr(L.time, "sleep", lambda s: None)
     assert L._get("https://lrclib.net/api/x") == {"ok": 1}
     assert len(calls) == 3
+    assert L._get("https://lrclib.net/api/x") == {"ok": 1} and len(calls) == 3  # de la caché
 
     def not_found(req, timeout):
         raise urllib.error.HTTPError(req.full_url, 404, "no", {}, None)
 
     monkeypatch.setattr(L.urllib.request, "urlopen", not_found)
-    assert L._get("https://lrclib.net/api/x") is None
+    assert L._get("https://lrclib.net/api/y") is None
 
 
 def test_fetch_lrclib_prefers_same_duration_then_same_song(monkeypatch):
@@ -159,7 +161,7 @@ class FakeModel:
                  for j, t in enumerate(line.split())] for i, line in enumerate(text.split("\n"))]
         return result(*segs)
 
-    def transcribe(self, audio, language, verbose):
+    def transcribe(self, audio, language, verbose, **kw):
         self.transcribed = True
         return result(*[[word(" hello", 10.0 + i * 2, 10.4 + i * 2), word(f" world{i}", 10.5 + i * 2, 11.0 + i * 2)]
                         for i in range(15)])
@@ -202,3 +204,23 @@ def test_chart_folders(tmp_path):
     assert L.chart_folders([a]) == [a]
     assert L.chart_folders([tmp_path]) == [a]
     assert L.chart_folders([], charts_dir=tmp_path) == [a]
+
+
+def test_lines_agree():
+    a = [{"text": "one", "start_ms": 1000}, {"text": "two", "start_ms": 5000}, {"text": "one", "start_ms": 9000}]
+    near = [{"text": "one", "start_ms": 1300}, {"text": "two", "start_ms": 4800}, {"text": "one", "start_ms": 9100}]
+    far = [{"text": "one", "start_ms": 41000}, {"text": "two", "start_ms": 45000}, {"text": "one", "start_ms": 49000}]
+    assert L.lines_agree(a, near)
+    assert not L.lines_agree(a, far)
+    assert not L.lines_agree(a, [{"text": "other", "start_ms": 1000}])
+
+
+def test_doubtful_alignment_uses_transcript_times(tmp_path, monkeypatch):
+    """Ajuste directo flojo y desplazado, con la duración buena: manda la transcripción si encaja con el texto."""
+    folder = make_folder(tmp_path)
+    model = FakeModel(align_prob=0.1)
+    monkeypatch.setattr(L, "fetch_lrclib", lambda *a: {"id": 7, "plainLyrics": "hello world3\nhello world4"})
+    monkeypatch.setattr(L, "load_model", lambda device: model)
+    monkeypatch.setattr(L, "detect_language", lambda m, v: "en")
+    d = L.lyrics_for(folder, "cpu")
+    assert d["source"] == "lrclib+whisper" and d["lines"][0]["start_ms"] >= 15000  # y no en el segundo 1

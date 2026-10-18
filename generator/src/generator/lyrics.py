@@ -16,6 +16,7 @@ Las canciones sin letra (instrumentales, o sin nada fiable) también se apuntan,
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -33,24 +34,42 @@ USER_AGENT = "MusicHero/0.1 (https://github.com/Kobayashi82/Music-Hero)"
 DURATION_TOLERANCE_S = 6
 MIN_WHISPER_PROB = 0.55  # confianza media mínima de un trozo transcrito
 MIN_WORDS = 20  # menos que esto (transcrito) no se considera letra
-MIN_MISMATCH_CONF = 0.5  # texto de LRCLIB con otra duración: por debajo, el ajuste directo no vale
+# Ajuste directo con menos confianza: a menudo está desplazado (en Kids, One Vision o Quién me ha robado el
+# mes de abril, 40-140 s), así que se compara con el texto puesto sobre la transcripción.
+MIN_ALIGN_CONF = 0.5
 MIN_MERGE_MATCH = 0.5  # parte del texto de LRCLIB que debe aparecer en la transcripción para usarlo
 HALLUCINATIONS = re.compile(r"(thank you|thanks for watching|subtitles?|subtítulos|gracias por ver|amara\.org|"
                             r"ご視聴|字幕|おやすみなさい|♪)", re.I)
 DEFAULT_CHARTS = Path(__file__).resolve().parents[3] / "out" / "charts"
+CACHE_DIR: Path | None = Path(__file__).resolve().parents[3] / "out" / "cache" / "lrclib"
 
 
 # ---------- LRCLIB ----------
 
 def _get(url: str, tries: int = 6) -> object:
-    """GET a LRCLIB; reintenta los 5xx y los cortes (da 503 a ratos). Si no hay forma, la excepción sube."""
+    """GET a LRCLIB, guardado en CACHE_DIR (las repeticiones no vuelven a preguntar)."""
+    path = CACHE_DIR / f"{hashlib.sha1(url.encode()).hexdigest()}.json" if CACHE_DIR else None
+    if path and path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            pass
+    data = _fetch(url, tries)
+    if path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return data
+
+
+def _fetch(url: str, tries: int) -> object:
+    """Reintenta los 5xx y los cortes (LRCLIB da 503 a ratos). Si no hay forma, la excepción sube."""
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     for attempt in range(tries):
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 return json.load(r)
         except urllib.error.HTTPError as e:
-            if e.code == 404:
+            if e.code in (400, 404):  # 400: datos que no acepta (p. ej. sin artista): como no encontrada
                 return None
             if e.code < 500 and e.code != 429 or attempt == tries - 1:
                 raise
@@ -347,9 +366,24 @@ def merge_with_transcript(text_lines: list[str], segs: list[list[dict]]) -> tupl
     return out, matched
 
 
+def lines_agree(a: list[dict], b: list[dict], tol_ms: int = 1000) -> bool:
+    """Las dos versiones de la letra colocan las mismas líneas en el mismo sitio (mediana de la diferencia
+    de inicio dentro de tol_ms, en al menos la mitad de las líneas)."""
+    starts = {}
+    for line in a:
+        starts.setdefault(line["text"], []).append(line["start_ms"])
+    diffs = [min(abs(s - line["start_ms"]) for s in starts[line["text"]]) for line in b if line["text"] in starts]
+    if len(diffs) < 0.5 * min(len(a), len(b)) or not diffs:
+        return False
+    return sorted(diffs)[len(diffs) // 2] <= tol_ms
+
+
 def make_lyrics(song: dict, vocals: Path, device: str = "cuda", use_whisper: bool = True) -> dict:
     t0 = time.perf_counter()
-    rec = fetch_lrclib(song["title"], song.get("artist", ""), song.get("album", ""), song["duration_ms"] / 1000)
+    title, artist = song["title"], song.get("artist") or ""
+    if not artist and " - " in title:  # sin etiqueta de artista: "Pink Floyd - Shine On You Crazy Diamond"
+        artist, title = (s.strip() for s in title.split(" - ", 1))
+    rec = fetch_lrclib(title, artist, song.get("album") or "", song["duration_ms"] / 1000)
     base = {"schema_version": SCHEMA_VERSION, "audio_sha256": song["audio_sha256"],
             "generator": {"version": LYRICS_VERSION, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                           "model": WHISPER_MODEL}}
@@ -361,21 +395,34 @@ def make_lyrics(song: dict, vocals: Path, device: str = "cuda", use_whisper: boo
     model = load_model(device)
     lang = detect_language(model, vocals)
     text = lyric_lines(rec["plainLyrics"]) if rec and rec.get("plainLyrics") else []
+    aligned, a_conf = [], 0.0
     if text:
         result = model.align(str(vocals), "\n".join(text), language=lang, original_split=True)
         if result is not None:
-            out, conf = _lines_of(result)
-            if out and (conf >= MIN_MISMATCH_CONF or not rec.get("duration_mismatch")):
-                return done(source="lrclib", language=lang, confidence=round(conf, 3), lrclib_id=rec.get("id"),
-                            lines=out)
+            aligned, a_conf = _lines_of(result)
+
+    def from_align() -> dict:
+        return done(source="lrclib", language=lang, confidence=round(a_conf, 3), lrclib_id=rec.get("id"),
+                    lines=aligned)
+
+    if aligned and a_conf >= MIN_ALIGN_CONF:
+        return from_align()
+    usable_align = bool(aligned) and not rec.get("duration_mismatch")  # mejor que nada si no hay otra cosa
     if not use_whisper:
-        return done(source="none", lines=[])
-    segs, conf = _segs_of(model.transcribe(str(vocals), language=lang, verbose=None), MIN_WHISPER_PROB)
-    if text:  # el ajuste directo no encajó: texto de LRCLIB con los tiempos de la transcripción
+        return from_align() if usable_align else done(source="none", lines=[])
+    # sin encadenar cada trozo con lo anterior: si no, a veces se queda en bucle ("Thank you." toda la canción)
+    result = model.transcribe(str(vocals), language=lang, verbose=None, condition_on_previous_text=False)
+    segs, conf = _segs_of(result, MIN_WHISPER_PROB)
+    if text:  # el ajuste directo es dudoso: texto de LRCLIB con los tiempos de la transcripción
         merged, matched = merge_with_transcript(text, segs)
         if matched >= MIN_MERGE_MATCH:
+            merged = _finish_lines(merged)
+            if usable_align and lines_agree(aligned, merged):
+                return from_align()  # coinciden: el ajuste directo da mejor cada palabra
             return done(source="lrclib+whisper", language=lang, confidence=round(conf, 3),
-                        matched=round(matched, 3), lrclib_id=rec.get("id"), lines=_finish_lines(merged))
+                        matched=round(matched, 3), lrclib_id=rec.get("id"), lines=merged)
+    if usable_align:
+        return from_align()
     out = _finish_lines(segs)
     if sum(len(l["words"]) for l in out) < MIN_WORDS:
         return done(source="none", language=lang, lines=[])
