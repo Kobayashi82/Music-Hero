@@ -18,7 +18,7 @@ class Config:
     note_speed: float = 1.0  # 1 = una nota tarda 1,2 s del horizonte a la línea
     highway_width: int = 560  # px de ancho en la línea de golpeo
     position: str = "center"  # center | left | right
-    opacity: float = 0.85  # del fondo de la autopista
+    opacity: float = 0.95  # del fondo de la autopista
     volume: float = 1.0
 
     @classmethod

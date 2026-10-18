@@ -130,12 +130,18 @@ Estado (18-10-2026): ✅ toda la carpeta de música (676 canciones; se saltan 7 
 
 Primero con audio reproducido por la propia app: así la sincronía es exacta y se aísla el problema del juego.
 
-- [ ] Autopista en perspectiva, 5 carriles, notas, sustains, HOPOs, línea de golpeo.
-- [ ] Detección de acierto: botón(es) correcto(s) + strum dentro de la ventana de tiempo; HOPO sin strum si la nota anterior fue acierto.
-- [ ] Puntuación, racha, multiplicador, % de acierto al final.
-- [ ] Pantalla de calibración de retardo (audio y vídeo), guardada en la config.
-- [ ] Selector de dificultad rápido desde el propio overlay.
-- [ ] Opacidad, tamaño y posición del overlay configurables.
+- [x] Autopista en perspectiva, 5 carriles, notas, sustains, HOPOs, línea de golpeo.
+- [x] Detección de acierto: botón(es) correcto(s) + strum dentro de la ventana de tiempo; HOPO sin strum si la nota anterior fue acierto.
+- [x] Puntuación, racha, multiplicador, % de acierto al final.
+- [x] Pantalla de calibración de retardo, guardada en la config: la del audio con clics (rasguear al oído); la de la imagen, a mano en Ajustes.
+- [x] Selector de dificultad rápido desde el propio overlay.
+- [x] Opacidad, tamaño y posición del overlay configurables.
+- [x] Menú con la guitarra: + abre la pausa (continuar, dificultad, reiniciar, ajustes, calibrar, salir), − cambia de dificultad sin parar la canción; strum mueve, verde elige, rojo vuelve. Lo mismo con teclado (Espacio, Tab, flechas, Intro, Retroceso).
+- [x] La guitarra se reconecta sola si se apaga o se enciende con el juego abierto.
+- [ ] Selector de canciones en el overlay: artista → álbum → canción, con las etiquetas del audio (las que tienen chart).
+- [ ] Letra debajo de la autopista. Se saca al generar: la de la chart humana si la trae; si no, la sincronizada de LRCLIB (artista, título y duración), y Whisper sobre la pista de voz para ajustar cada palabra. Whisper solo, sin letra conocida, como último recurso (con voces susurradas se inventa frases). Versión nueva del esquema de chart.
+
+Estado (18-10-2026): primera versión jugable; el usuario la ha probado con la guitarra de Wii en 5 canciones (Difícil, velocidad de notas 0,8). Hecho el menú, la calibración y una autopista más legible (notas con canto y aro blanco en los HOPO, colas más anchas que brillan al mantener, carril iluminado al pulsar, fondo más opaco, paneles con fondo). Falta calibrar en su PC, el selector de canciones y la letra. `play --autoplay` toca solo, para probar la vista.
 
 **Terminado cuando:** se puede jugar una canción entera y la sensación de ritmo es buena tras calibrar.
 

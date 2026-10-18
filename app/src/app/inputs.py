@@ -5,11 +5,12 @@ juego los pasa a ms de la canción con el reloj del reproductor (Player.position
 
 Teclado, con el juego activo (las teclas no llegan a la app que tenga el foco):
     A S D F G          trastes verde, rojo, amarillo, azul, naranja
-    flechas arriba/abajo, Intro   strum
-    Espacio            pausa          Retroceso   reiniciar la canción
-    Tab                cambiar de dificultad (en pausa)
+    flechas arriba/abajo, Intro   strum (en los menús: mover; Intro elige)
+    Espacio            menú (pausa)   Retroceso   reiniciar la canción (en los menús: volver)
+    Tab                cambiar de dificultad sin parar la canción
 Siempre: Ctrl+Alt+H mostrar/ocultar (oculto = pausa y teclado libre), Ctrl+Alt+Q salir.
-Guitarra: Start pausa; en pausa, Select reinicia y el strum cambia de dificultad.
+Guitarra: + menú (pausa), − cambiar de dificultad; en los menús, strum mover, verde o + elegir,
+rojo o − volver. Si la guitarra se apaga o se enciende más tarde, se reconecta sola.
 """
 
 from __future__ import annotations
@@ -24,8 +25,8 @@ from dataclasses import dataclass
 from . import win32
 
 FRET_KEYS = ("a", "s", "d", "f", "g")
-STRUM_KEYS = ("up", "down", "enter")
-CONTROL_KEYS = {"space": "pause", "backspace": "restart", "tab": "difficulty"}
+STRUM_KEYS = ("up", "down")
+CONTROL_KEYS = {"space": "pause", "backspace": "restart", "tab": "difficulty", "enter": "enter"}
 GLOBAL_HOTKEYS = {"toggle": "ctrl+alt+h", "quit": "ctrl+alt+q"}
 
 
@@ -47,8 +48,7 @@ class Inputs:
     def start(self) -> None:
         self.keyboard.start()
         self.errors += self.keyboard.errors
-        if not self.guitar.start():
-            self.errors.append(f"guitarra: {self.guitar.error}")
+        self.guitar.start()  # su estado lo enseña el juego (guitar.connected)
 
     def stop(self) -> None:
         self.keyboard.stop()
@@ -144,56 +144,71 @@ class KeyboardSource:
 
 
 class GuitarSource:
-    """Guitarra de Wii por HID (wii_guitar.py); si no hay Wiimote, no hace nada."""
+    """Guitarra de Wii por HID (wii_guitar.py). Si no está o se desconecta, lo reintenta cada pocos segundos."""
+
+    RETRY_S = 2.0
 
     def __init__(self, events: queue.SimpleQueue):
         self.events = events
         self.error = ""
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._guitar = None
         self.connected = False
 
     def start(self) -> bool:
-        try:
-            from .wii_guitar import WiiGuitar
-
-            self._guitar = WiiGuitar.open()
-        except Exception as e:  # noqa: BLE001 - sin guitarra se juega con teclado
-            self.error = str(e)
-            return False
-        self.connected = True
+        """Lanza el hilo; True si la guitarra estaba ya al empezar."""
+        found = self._open() is not None
         self._thread = threading.Thread(target=self._run, daemon=True, name="guitarra")
         self._thread.start()
-        return True
+        return found
 
     def stop(self) -> None:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=1)
 
-    def _run(self) -> None:
-        prev = None
+    def _open(self):
         try:
-            while not self._stop.is_set():
-                s = self._guitar.poll(20)
-                if s is None:
-                    continue
-                now = time.perf_counter()
-                if prev is not None:
-                    for i, (a, b) in enumerate(zip(prev.frets, s.frets)):
-                        if a != b:
-                            self.events.put(InputEvent(now, "fret", i, b))
-                    if s.strum_up and not prev.strum_up:
-                        self.events.put(InputEvent(now, "strum", -1))
-                    if s.strum_down and not prev.strum_down:
-                        self.events.put(InputEvent(now, "strum", 1))
-                    if s.start and not prev.start:
-                        self.events.put(InputEvent(now, "control", "start"))
-                    if s.select and not prev.select:
-                        self.events.put(InputEvent(now, "control", "select"))
-                prev = s
-        except OSError as e:  # Wiimote desconectado o apagado
+            from .wii_guitar import WiiGuitar
+
+            self._guitar = WiiGuitar.open()
+        except Exception as e:  # noqa: BLE001 - sin guitarra se juega con teclado
             self.error = str(e)
-            self.connected = False
-        finally:
-            self._guitar.close()
+            self._guitar = None
+        self.connected = self._guitar is not None
+        return self._guitar
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            if self._guitar is None and (self._stop.wait(self.RETRY_S) or self._open() is None):
+                continue
+            try:
+                self._read(self._guitar)
+            except Exception as e:  # noqa: BLE001 - Wiimote desconectado o apagado
+                self.error = str(e)
+            finally:
+                self.connected = False
+                self._guitar.close()
+                self._guitar = None
+
+    def _read(self, guitar) -> None:
+        prev = None
+        while not self._stop.is_set():
+            s = guitar.poll(20)
+            if s is None:
+                continue
+            now = time.perf_counter()
+            if prev is not None:
+                for i, (a, b) in enumerate(zip(prev.frets, s.frets)):
+                    if a != b:
+                        self.events.put(InputEvent(now, "fret", i, b))
+                if s.strum_up and not prev.strum_up:
+                    self.events.put(InputEvent(now, "strum", -1))
+                if s.strum_down and not prev.strum_down:
+                    self.events.put(InputEvent(now, "strum", 1))
+                if s.start and not prev.start:
+                    self.events.put(InputEvent(now, "control", "start"))
+                if s.select and not prev.select:
+                    self.events.put(InputEvent(now, "control", "select"))
+            prev = s

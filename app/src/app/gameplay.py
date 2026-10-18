@@ -26,7 +26,7 @@ SUSTAIN_POINTS_PER_MS = 25 / 500
 STREAK_PER_MULT = 10
 MAX_MULT = 4
 
-PENDING, HIT, MISSED = 0, 1, 2
+PENDING, HIT, MISSED, SKIPPED = 0, 1, 2, 3  # SKIPPED: quedó atrás al cambiar de dificultad, no cuenta
 
 
 @dataclass
@@ -124,6 +124,12 @@ class Game:
             else:
                 break
         self._check_sustains(t)
+
+    def skip_to(self, t: float) -> None:
+        """Empezar a mitad de canción: las notas antes de t no se juegan ni cuentan."""
+        while self.next < len(self.notes) and self.notes[self.next].note.time_ms < t:
+            self.notes[self.next].state = SKIPPED
+            self.next += 1
 
     @property
     def finished(self) -> bool:

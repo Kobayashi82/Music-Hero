@@ -25,8 +25,14 @@ def wasapi_output() -> int | None:
 
 
 class Player:
-    def __init__(self, path: Path, offset_ms: float = 0.0, lead_in_ms: float = 2000.0, volume: float = 1.0):
-        audio, self.sr = sf.read(str(path), dtype="float32", always_2d=True)
+    def __init__(self, source: Path | tuple[np.ndarray, int], offset_ms: float = 0.0, lead_in_ms: float = 2000.0,
+                 volume: float = 1.0):
+        """source: archivo de audio o (muestras float32, frecuencia)."""
+        if isinstance(source, tuple):
+            audio, self.sr = source
+            audio = audio.reshape(len(audio), -1)
+        else:
+            audio, self.sr = sf.read(str(source), dtype="float32", always_2d=True)
         self.audio = audio[:, :2] if audio.shape[1] >= 2 else np.repeat(audio, 2, axis=1)
         self.duration_ms = len(self.audio) / self.sr * 1000
         self.offset_ms = offset_ms
