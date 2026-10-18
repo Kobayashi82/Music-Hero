@@ -180,7 +180,8 @@ Estado (18-10-2026): falta el resultado de v5 (examen frente a v4) y, si gana, r
 
 - [ ] Canciones de streaming: grabar por loopback la primera vez que suenan, procesarlas, y la siguiente vez ya hay chart.
 - [ ] Icono en la bandeja con ajustes, biblioteca y estado del procesado. Hecho (18-10-2026): el icono (la autopista en pequeño), un clic muestra u oculta, menú con Mostrar/ocultar y Salir; «Salir» de los menús del juego pasa a «Ocultar». Falta lo de la biblioteca y el procesado (fase 7).
-- [ ] Estadísticas por canción, temas visuales, star power.
+- [x] Estadísticas por canción (hechas en la fase 3). Temas visuales: más adelante, si acaso (el usuario no tiene prisa).
+- [ ] Star power (en curso, 18-10-2026). Plan: frases de notas brillantes por dificultad (las de la chart humana si las trae; si no, en el juego: tramos de 2 compases de los más densos, una cada 20-30 s); completar una frase entera llena 1/4 de la barra; con la mitad o más se activa (levantar la guitarra con el acelerómetro del Wiimote, o una tecla configurable) y el multiplicador se duplica (hasta x8) mientras la barra se gasta al ritmo de los pulsos (barra llena = 32 pulsos); autopista iluminada mientras dura. Después, el generador guarda las frases en chart.json (esquema v2: «star_power» por dificultad, las humanas de .chart/.mid). Hecho: el Wiimote puede pedir informes 0x35 con el acelerómetro calibrado (`WiiGuitar.open(accel=True)`, de momento solo en `tools/poc_wii_tilt.py`); falta que el usuario lo pruebe para saber qué eje sigue al mástil.
 
 ### Fase 7 – Distribución
 
