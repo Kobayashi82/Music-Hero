@@ -26,6 +26,7 @@ class Option:
     action: Callable[[], None] | None = None  # al elegirla
     value: Callable[[], str] | str | None = None  # texto del valor (fijo o calculado al pintar)
     change: Callable[[int], None] | None = None  # +1 sube, -1 baja
+    sep: bool = False  # línea encima: empieza otro grupo (no ocupa fila)
 
     @property
     def editable(self) -> bool:
@@ -92,9 +93,10 @@ class Menu:
         pad = WINDOW - len(idx) if self.long else 0
         items = [o.label for o in shown] + [""] * pad
         values = [o.value() if callable(o.value) else (o.value or "") for o in shown] + [""] * pad
+        seps = [o.sep and i > 0 for i, o in enumerate(shown)] + [False] * pad  # arriba de la página, no
         pages = -(-n // WINDOW)
         return {"title": self.title, "body": self.body, "sel": self.sel - start, "editing": self.editing,
-                "items": items, "values": values, "rows": idx + [-1] * pad,
+                "items": items, "values": values, "seps": seps, "rows": idx + [-1] * pad,
                 "above": start > 0, "below": start + WINDOW < n, "editHint": self.edit_hint,
                 "position": f"{self.sel + 1} / {n} · página {start // WINDOW + 1} de {pages}" if self.long else ""}
 
@@ -151,6 +153,12 @@ class SearchMenu(Menu):
             self._refresh()
             return
         super().select()
+
+
+def sep_above(opt: Option) -> Option:
+    """La misma opción, empezando otro grupo (con una línea encima)."""
+    opt.sep = True
+    return opt
 
 
 def stepper(get: Callable[[], float], set_: Callable[[float], None], step: float, lo: float, hi: float

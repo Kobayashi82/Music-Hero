@@ -45,7 +45,7 @@ from .gameplay import HIT, MISSED, SKIPPED, Game
 from .inputs import ACTION_NAMES, ACTIONS, BACKSPACE, GLOBAL_ACTIONS, Inputs, assign, keymap
 from .library import Entry, MusicWatcher, group, in_dirs, norm, pending_entries, scan, search, without_chart
 from .lyrics import Lyrics
-from .menu import Menu, Option, SearchMenu, cycler, stepper
+from .menu import Menu, Option, SearchMenu, cycler, sep_above, stepper
 from .paths import APP_LOG, CHARTS_DIR, FROZEN
 from .player import Player
 from .records import Play, Records
@@ -513,7 +513,7 @@ class Session(QObject):
             return f"{st.pending} en cola" + (" · en pausa mientras juegas" if st.paused else "")
         if self.missing and not self.cfg.background:
             return f"{len(self.missing)} sin chart (generar en segundo plano: no)"
-        return "al día" if self.cfg.library_dirs else "sin carpetas de música"
+        return "al día" if self.cfg.library_dirs else "sin carpetas de música (Ajustes → Biblioteca)"
 
     def library_menu(self) -> Menu:
         cfg = self.cfg
@@ -529,12 +529,12 @@ class Session(QObject):
         opts = [Option("Añadir carpeta", lambda: QTimer.singleShot(0, self.add_library_dir))]
         opts += [Option(Path(d).name or d, lambda d=d: self.menus.append(self.folder_menu(d)), value="carpeta")
                  for d in cfg.library_dirs]
-        opts.append(Option("Generar en segundo plano", value=lambda: "Sí" if cfg.background else "No",
+        opts.append(Option("Generar en segundo plano", value=lambda: "Sí" if cfg.background else "No", sep=True,
                            change=cycler([False, True], lambda: cfg.background, set_background)))
         if installer.needed():
             opts.append(Option("Instalar el motor", lambda: self.offer_install(force=True)))
         opts.append(Option("Reintentar las que fallaron", self.engine.retry))
-        opts.append(Option("Volver", self.menu_back))
+        opts.append(Option("Volver", self.menu_back, sep=True))
         return Menu("Biblioteca", opts, body=self.library_body)
 
     def library_body(self) -> str:
@@ -612,8 +612,8 @@ class Session(QObject):
             Option("Añadir la carpeta de tu música", lambda: self.menus.append(self.library_menu())),
             Option("Elegir canción", self.open_selector),
             Option("Emparejar la guitarra de Wii", lambda: self.menus.append(self.pairing_menu())),
-            Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
-            self.leave_option(),
+            Option("Ajustes", lambda: self.menus.append(self.settings_menu()), sep=True),
+            sep_above(self.leave_option()),
         ], body=lambda: WELCOME + (f"<br><br>Biblioteca: {self.library_line()}" if self.cfg.library_dirs else ""))
 
     # ---------- menús ----------
@@ -756,15 +756,14 @@ class Session(QObject):
         return Menu("Pausa", [
             Option("Continuar", self.resume),
             *extra,
-            Option("Cambiar canción", self.open_selector),
+            Option("Cambiar canción", self.open_selector, sep=True),
             Option("Canción al azar", self.play_random),
             Option("Buscar canción", self.open_search),
-            self.difficulty_option(),
+            sep_above(self.difficulty_option()),
             self.autoplay_option(),
             Option("Reiniciar", self.restart),
-            Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
-            Option("Calibrar el retardo", self.start_calibration),
-            self.leave_option(),
+            Option("Ajustes", lambda: self.menus.append(self.settings_menu()), sep=True),
+            sep_above(self.leave_option()),
         ], body=self.pause_body, on_back=self.resume)
 
     def leave_option(self) -> Option:
@@ -785,11 +784,10 @@ class Session(QObject):
             Option("Otra canción", self.open_selector),
             Option("Canción al azar", self.play_random),
             Option("Buscar canción", self.open_search),
-            self.difficulty_option(),
+            sep_above(self.difficulty_option()),
             self.autoplay_option(),
-            Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
-            Option("Calibrar el retardo", self.start_calibration),
-            self.leave_option(),
+            Option("Ajustes", lambda: self.menus.append(self.settings_menu()), sep=True),
+            sep_above(self.leave_option()),
         ], body=lambda: self.results)
 
     def num(self, name: str, step: float, lo: float, hi: float, after=None):
@@ -802,26 +800,52 @@ class Session(QObject):
         return stepper(lambda: getattr(self.cfg, name), set_, step, lo, hi)
 
     def settings_menu(self) -> Menu:
+        """Por grupos: lo de fuera del juego (biblioteca, mando), los submenús de ajustes y, en la app
+        instalada, abrirla al iniciar Windows."""
+        def sub(make):
+            return lambda: self.menus.append(make())
+
+        opts = [
+            Option("Biblioteca", sub(self.library_menu), value=self.library_short),
+            Option("Guitarra y teclas", sub(self.controls_menu),
+                   value=lambda: "conectada" if self.inputs.guitar.connected else ""),
+            Option("Juego", sub(self.game_settings_menu), sep=True),
+            Option("Pantalla", sub(self.display_menu)),
+            Option("Sonido y retardo", sub(self.sound_menu)),
+        ]
+        if FROZEN:  # la de desarrollo se lanza con uv: no tiene un .exe que poner al iniciar Windows
+            on = [win32.autostart()]
+
+            def set_autostart(v: bool) -> None:
+                win32.set_autostart(v, f'"{sys.executable}" --hidden')
+                on[0] = win32.autostart()
+            opts.append(Option("Abrir al iniciar Windows", value=lambda: "Sí" if on[0] else "No", sep=True,
+                               change=cycler([False, True], lambda: on[0], set_autostart)))
+        opts.append(Option("Volver", self.menu_back, sep=True))
+        return Menu("Ajustes", opts, body="Elige una opción para cambiarla con el strum; se guarda sola.")
+
+    def game_settings_menu(self) -> Menu:
+        cfg, num = self.cfg, self.num
+        return Menu("Juego", [
+            Option("Dificultad por defecto", value=lambda: DIFF_NAMES.get(cfg.difficulty, cfg.difficulty),
+                   change=cycler(list(reversed(DIFFS)), lambda: cfg.difficulty,
+                                 lambda v: (setattr(cfg, "difficulty", v), cfg.save()))),
+            Option("Velocidad de las notas", value=lambda: f"{cfg.note_speed:.1f}".replace(".", ","),
+                   change=num("note_speed", 0.1, 0.5, 2.0)),
+            Option("Letra", value=lambda: "Sí" if cfg.lyrics else "No",
+                   change=cycler([False, True], lambda: cfg.lyrics,
+                                 lambda v: (setattr(cfg, "lyrics", v), cfg.save()))),
+            Option("Volver", self.menu_back, sep=True),
+        ])
+
+    def display_menu(self) -> Menu:
         cfg, num = self.cfg, self.num
 
         def set_position(v) -> None:
             cfg.position = v
             self.place()
             cfg.save()
-
-        def pct(v: float) -> str:
-            return f"{round(v * 100)} %"
-
-        return Menu("Ajustes", [
-            Option("Biblioteca", lambda: self.menus.append(self.library_menu()), value=self.library_short),
-            Option("Dificultad por defecto", value=lambda: DIFF_NAMES.get(cfg.difficulty, cfg.difficulty),
-                   change=cycler(list(reversed(DIFFS)), lambda: cfg.difficulty,
-                                 lambda v: (setattr(cfg, "difficulty", v), cfg.save()))),
-            Option("Velocidad de las notas", value=lambda: f"{cfg.note_speed:.1f}".replace(".", ","),
-                   change=num("note_speed", 0.1, 0.5, 2.0)),
-            Option("Volumen", value=lambda: pct(cfg.volume),
-                   change=num("volume", 0.1, 0.0, 1.0, lambda: setattr(self.player, "volume", cfg.volume))),
-            Option("Retardo", lambda: self.menus.append(self.delay_menu())),
+        return Menu("Pantalla", [
             Option("Opacidad del fondo", value=lambda: pct(cfg.opacity), change=num("opacity", 0.05, 0.2, 1.0)),
             Option("Ancho de la autopista", value=lambda: f"{cfg.highway_width} px",
                    change=num("highway_width", 40, 320, 1200, self.place)),
@@ -830,34 +854,39 @@ class Session(QObject):
             Option("Marcador", value=lambda: SIDES.get(cfg.hud_side, cfg.hud_side),
                    change=cycler(list(SIDES), lambda: cfg.hud_side,
                                  lambda v: (setattr(cfg, "hud_side", v), cfg.save()))),
-            Option("Teclas", lambda: self.menus.append(self.keys_menu())),
+            Option("Volver", self.menu_back, sep=True),
+        ])
+
+    def sound_menu(self) -> Menu:
+        cfg, num = self.cfg, self.num
+        return Menu("Sonido y retardo", [
+            Option("Volumen", value=lambda: pct(cfg.volume),
+                   change=num("volume", 0.1, 0.0, 1.0, lambda: setattr(self.player, "volume", cfg.volume))),
+            Option("Calibrar el retardo", self.start_calibration, sep=True),
+            Option("Retardo del audio", value=lambda: f"{cfg.audio_offset_ms:+.0f} ms",
+                   change=num("audio_offset_ms", 5, -300, 500, self.apply_offsets)),
+            Option("Retardo de AIMP", value=lambda: f"{cfg.aimp_offset_ms:+.0f} ms",
+                   change=num("aimp_offset_ms", 5, -300, 800, self.apply_offsets)),
+            Option("Retardo de la imagen", value=lambda: f"{cfg.video_offset_ms:+.0f} ms",
+                   change=num("video_offset_ms", 5, -200, 300)),
+            Option("Volver", self.menu_back, sep=True),
+        ], body="Audio: lo que tardan en sonar tus altavoces (lo mide «Calibrar el retardo»).<br>"
+                "AIMP: lo que tarda AIMP en hacer sonar su posición (se mide solo al seguirlo).<br>"
+                "Imagen: lo que tarda la pantalla en enseñar las notas.")
+
+    def controls_menu(self) -> Menu:
+        return Menu("Guitarra y teclas", [
             Option("Emparejar la guitarra de Wii", lambda: self.menus.append(self.pairing_menu()),
                    value=lambda: "conectada" if self.inputs.guitar.connected else ""),
-            Option("Letra", value=lambda: "Sí" if cfg.lyrics else "No",
-                   change=cycler([False, True], lambda: cfg.lyrics,
-                                 lambda v: (setattr(cfg, "lyrics", v), cfg.save()))),
-            Option("Volver", self.menu_back),
-        ], body="Elige una opción para cambiarla con el strum; se guarda sola.")
+            Option("Teclas", lambda: self.menus.append(self.keys_menu())),
+            Option("Volver", self.menu_back, sep=True),
+        ])
 
     def library_short(self) -> str:
         st = self.engine.state
         if st.current:
             return f"generando {round(st.done * 100)} %"
         return f"{st.pending} en cola" if st.pending else ""
-
-    def delay_menu(self) -> Menu:
-        cfg, num = self.cfg, self.num
-        return Menu("Retardo", [
-            Option("Del audio", value=lambda: f"{cfg.audio_offset_ms:+.0f} ms",
-                   change=num("audio_offset_ms", 5, -300, 500, self.apply_offsets)),
-            Option("De AIMP", value=lambda: f"{cfg.aimp_offset_ms:+.0f} ms",
-                   change=num("aimp_offset_ms", 5, -300, 800, self.apply_offsets)),
-            Option("De la imagen", value=lambda: f"{cfg.video_offset_ms:+.0f} ms",
-                   change=num("video_offset_ms", 5, -200, 300)),
-            Option("Volver", self.menu_back),
-        ], body="Audio: lo que tardan en sonar tus altavoces (lo mide «Calibrar el retardo»).<br>"
-                "AIMP: lo que tarda AIMP en hacer sonar su posición (se mide solo al seguirlo).<br>"
-                "Imagen: lo que tarda la pantalla en enseñar las notas.")
 
     def aimp_offset(self) -> float:
         """Siguiendo a AIMP: su búfer (medido con el loopback) más lo de los altavoces (la calibración)."""
@@ -1333,6 +1362,10 @@ class Session(QObject):
                 lines.append(f"Tus strums van de media {abs(med):.0f} ms {when}" +
                              (" (si te pasa siempre, calibra el retardo)" if abs(med) > 25 else ""))
         return "<br>".join(lines)
+
+
+def pct(v: float) -> str:
+    return f"{round(v * 100)} %"
 
 
 def fmt_int(n: float) -> str:

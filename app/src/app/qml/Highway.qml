@@ -551,29 +551,36 @@ Item {
                    text: root.menuOpen && root.f.menu.above ? "▲" : ""; color: "#88ffffff"; font.pixelSize: 13 }
             Repeater {
                 model: root.menuOpen ? root.f.menu.items.length : 0
-                Rectangle {
-                    readonly property bool selected: index === root.f.menu.sel
-                    readonly property bool editing: selected && root.f.menu.editing
-                    width: menuCol.width; height: 44; radius: 8
-                    color: editing ? "#402ecc40" : selected ? "#28ffffff" : rowMouse.containsMouse ? "#14ffffff" : "transparent"
-                    border.color: selected ? (editing ? "#2ecc40" : "#90ffffff") : "transparent"; border.width: 2
-                    MouseArea {  // clic: elegir esta opción; derecho: volver
-                        id: rowMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        enabled: root.f.menu.rows[index] >= 0  // las filas vacías de la última página, no
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        onClicked: (mouse) => mouse.button === Qt.RightButton ? bridge.menuBack() : bridge.menuClick(index)
+                Item {  // la fila y, si empieza otro grupo, una línea encima
+                    readonly property bool sep: root.f.menu.seps[index] === true
+                    width: menuCol.width; height: row.height + (sep ? 14 : 0)
+                    Rectangle { visible: parent.sep; x: 12; y: 3; width: parent.width - 24; height: 1; color: "#40ffffff" }
+                    Rectangle {
+                        id: row
+                        readonly property bool selected: index === root.f.menu.sel
+                        readonly property bool editing: selected && root.f.menu.editing
+                        anchors.bottom: parent.bottom
+                        width: parent.width; height: 44; radius: 8
+                        color: editing ? "#402ecc40" : selected ? "#28ffffff" : rowMouse.containsMouse ? "#14ffffff" : "transparent"
+                        border.color: selected ? (editing ? "#2ecc40" : "#90ffffff") : "transparent"; border.width: 2
+                        MouseArea {  // clic: elegir esta opción; derecho: volver
+                            id: rowMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: root.f.menu.rows[index] >= 0  // las filas vacías de la última página, no
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            onClicked: (mouse) => mouse.button === Qt.RightButton ? bridge.menuBack() : bridge.menuClick(index)
+                        }
+                        Text { x: 16; anchors.verticalCenter: parent.verticalCenter
+                               width: parent.width - 48 - valueText.implicitWidth; elide: Text.ElideRight
+                               text: root.f.menu.items[index]; color: "white"; font.pixelSize: 20
+                               font.bold: parent.selected }
+                        Text { id: valueText
+                               anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
+                               readonly property string v: root.f.menu.values[index]
+                               text: v === "" ? "" : parent.editing ? "▲  " + v + "  ▼" : v
+                               color: parent.editing ? "#2ecc40" : "#ccffffff"; font.pixelSize: 20; font.bold: parent.editing }
                     }
-                    Text { x: 16; anchors.verticalCenter: parent.verticalCenter
-                           width: parent.width - 48 - valueText.implicitWidth; elide: Text.ElideRight
-                           text: root.f.menu.items[index]; color: "white"; font.pixelSize: 20
-                           font.bold: parent.selected }
-                    Text { id: valueText
-                           anchors.right: parent.right; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
-                           readonly property string v: root.f.menu.values[index]
-                           text: v === "" ? "" : parent.editing ? "▲  " + v + "  ▼" : v
-                           color: parent.editing ? "#2ecc40" : "#ccffffff"; font.pixelSize: 20; font.bold: parent.editing }
                 }
             }
             Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; height: 16

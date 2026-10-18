@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import winreg
 from ctypes import wintypes
 
 user32 = ctypes.windll.user32
@@ -197,6 +198,31 @@ def set_click_through(hwnd: int, on: bool) -> None:
     new = style | WS_EX_TRANSPARENT if on else style & ~WS_EX_TRANSPARENT
     if new != style:
         user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new)
+
+
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_NAME = "Music Hero"  # el mismo valor que pone el instalador (packaging/music_hero.iss) y quita al desinstalar
+
+
+def autostart() -> bool:
+    """¿Se abre al iniciar Windows? (el valor de Music Hero en Run del usuario)."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+            winreg.QueryValueEx(k, RUN_NAME)
+        return True
+    except OSError:
+        return False
+
+
+def set_autostart(on: bool, command: str) -> None:
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+        if on:
+            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, command)
+        else:
+            try:
+                winreg.DeleteValue(k, RUN_NAME)
+            except FileNotFoundError:
+                pass
 
 
 _k32 = ctypes.WinDLL("kernel32", use_last_error=True)

@@ -56,6 +56,9 @@ Type: filesandordirs; Name: "{localappdata}\MusicHero\engine"
 [Code]
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  // abrir al iniciar Windows también se activa desde la app (Ajustes): quitarlo aunque no lo pusiera el instalador
+  if CurUninstallStep = usUninstall then
+    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Music Hero');
   if (CurUninstallStep = usPostUninstall) and not UninstallSilent then
     if MsgBox('¿Borrar también las charts generadas, los récords y los ajustes?' + #13#10 +
               '(Si vas a volver a instalarlo, mejor no: así no hay que generarlas otra vez.)',
