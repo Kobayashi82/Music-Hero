@@ -23,6 +23,7 @@ Ver ROADMAP.md para fases y criterios de terminado.
 - Jugar sobre AIMP (fase 4): `uv run --project app play --hidden` y, con una canción sonando en AIMP, Ctrl+Alt+H; también `play` sin canción si AIMP está sonando. Mide solo el retardo de AIMP por loopback (`tools/measure_aimp_latency.py` aparte).
 - Tests (sin GPU): `uv run --project generator --with pytest --with jsonschema pytest tests`
 - Motor (fase 7, lo lanza la app): `uv run --project generator engine --queue <cola.json> --out <charts>` (órdenes JSON por stdin, avisos JSON por stdout; ver generator/engine.py). Modelos del motor instalado: `python -m generator.fetch_models`.
+- App instalable: `uv run --project app --with pyinstaller python packaging/build.py` → build/dist/Music Hero/ y, con Inno Setup, build/installer/MusicHero-Setup-*.exe (lleva models/best.pt como OnsetNet: reconstruir si cambia el modelo).
 - Probar como instalación nueva sin tocar lo de verdad: `MUSICHERO_HOME=<carpeta> APPDATA=<carpeta> uv run --project app play` (charts, cola y log del motor en MUSICHERO_HOME; config en APPDATA/MusicHero).
 - Modelo v5 (guitarra + CQT, para los botones): `sh tools/night_v5.sh` prepara, examina y entrena de noche (~6-7 h, GPU; solo cuando el usuario lo diga). Logs en `out/dataset/night_v5_*.log`; no toca out/charts ni models/best.pt. Copia de las charts v4 en `out/charts_backup_v4`. Al acabar: comparar los exámenes v5 y v4 y, si gana v5, copiarlo a models/best.pt y regenerar con `--force`.
 - Música del usuario: `D:\Programas\Multimedia\Musicas` (reproductor: AIMP)

@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .paths import CHARTS_DIR, ENGINE_DIR, ENGINE_LOG, FROZEN, MODEL, QUEUE_FILE, REPO
+from .paths import CHARTS_DIR, DATA, ENGINE_DIR, ENGINE_LOG, FROZEN, MODEL, QUEUE_FILE, REPO
 
 RESTART_DELAYS_S = (5, 30, 120)  # si se cae: espera antes de cada nuevo intento; luego, hasta que se le pida algo
 IDLE_QUIT_S = 300  # sin trabajo: se cierra (vuelve en cuanto haga falta)
@@ -35,6 +35,8 @@ def model_env(engine_dir: Path) -> dict[str, str]:
 def engine_command() -> tuple[list[str], dict[str, str], Path] | None:
     """(orden, entorno, carpeta) para lanzar el motor; None si no se puede (sin uv, o sin instalar)."""
     args = ["--queue", str(QUEUE_FILE), "--out", str(CHARTS_DIR), "--model", str(MODEL)]
+    if DATA == REPO / "out":  # en el repositorio se guardan las pistas (para rehacer la letra, entrenar...)
+        args.append("--keep-stems")
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}  # el del juego no es el del generador
     if FROZEN:
         from .installer import installed

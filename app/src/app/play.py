@@ -46,7 +46,7 @@ from .inputs import ACTION_NAMES, ACTIONS, BACKSPACE, GLOBAL_ACTIONS, Inputs, as
 from .library import Entry, MusicWatcher, group, in_dirs, norm, pending_entries, scan, search, without_chart
 from .lyrics import Lyrics
 from .menu import Menu, Option, SearchMenu, cycler, stepper
-from .paths import CHARTS_DIR
+from .paths import APP_LOG, CHARTS_DIR, FROZEN
 from .player import Player
 from .records import Play, Records
 from .sprites import SpriteProvider
@@ -1456,6 +1456,20 @@ def resolve(path: Path) -> Chart:
     return chart
 
 
+def install_engine() -> int:
+    """--install-engine: lo mismo que «Instalar el motor» del menú, sin juego (para instalaciones automáticas)."""
+    inst = installer.EngineInstaller()
+    inst.start()
+    last = ""
+    while inst.state == "running":
+        if inst.step != last:
+            last = inst.step
+            print(f"{round(inst.done * 100):3d} % {last}")
+        time.sleep(0.5)
+    print("motor instalado" if inst.state == "done" else f"error: {inst.error}")
+    return 0 if inst.state == "done" else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("song", type=Path, nargs="?",
@@ -1468,8 +1482,20 @@ def main() -> int:
     parser.add_argument("--screenshot-menu", action="store_true", help="con --screenshot: abre el menú antes")
     parser.add_argument("--autoplay", action="store_true", help="modo automático: el juego toca solo")
     parser.add_argument("--hidden", action="store_true", help="empezar oculto (Ctrl+Alt+H lo muestra)")
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+    parser.add_argument("--install-engine", action="store_true",
+                        help="(app instalada) instalar el motor de generación sin abrir el juego, y salir")
+    if FROZEN or sys.stdout is None:  # instalada (sin consola): a un log
+        APP_LOG.parent.mkdir(parents=True, exist_ok=True)
+        sys.stdout = sys.stderr = open(APP_LOG, "a", encoding="utf-8", buffering=1)  # noqa: SIM115
+        print(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} {' '.join(sys.argv[1:])}")
+    else:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     args = parser.parse_args()
+    if args.install_engine:
+        return install_engine()
+    if not win32.single_instance("MusicHero.play"):
+        print("Music Hero ya está abierto")
+        return 0
 
     cfg = Config.load()
     if args.speed:

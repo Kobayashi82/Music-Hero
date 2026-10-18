@@ -197,3 +197,22 @@ def set_click_through(hwnd: int, on: bool) -> None:
     new = style | WS_EX_TRANSPARENT if on else style & ~WS_EX_TRANSPARENT
     if new != style:
         user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new)
+
+
+_k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_k32.CreateMutexW.restype = wintypes.HANDLE
+_k32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+ERROR_ALREADY_EXISTS = 183
+_mutexes: list[int] = []  # abiertos mientras viva el proceso
+
+
+def single_instance(name: str) -> bool:
+    """False si ya hay otra copia abierta con ese nombre (un mutex con nombre; Windows lo suelta al salir)."""
+    h = _k32.CreateMutexW(None, False, "Local\\" + name)
+    if not h:
+        return True  # sin mutex no se puede saber: mejor dejar arrancar
+    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+        _k32.CloseHandle(h)
+        return False
+    _mutexes.append(h)
+    return True

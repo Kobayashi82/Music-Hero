@@ -145,10 +145,11 @@ def ensure_ffmpeg(home: Path) -> None:
 
 class Engine:
     def __init__(self, jobs: JobQueue, out_root: Path, model: Path | None, device: str, emit, lyrics: bool = True,
-                 generate_fn=None):
-        """emit(dict): manda un aviso. generate_fn: la de cli (los tests ponen otra)."""
+                 generate_fn=None, keep_stems: bool = False):
+        """emit(dict): manda un aviso. generate_fn: la de cli (los tests ponen otra). keep_stems: guardar las
+        pistas de Demucs (~50 MB por canción; sirven para rehacer la letra o entrenar, no para jugar)."""
         self.jobs, self.out_root, self.model, self.device = jobs, out_root, model, device
-        self.emit, self.lyrics = emit, lyrics
+        self.emit, self.lyrics, self.keep_stems = emit, lyrics, keep_stems
         self.commands: queue.SimpleQueue[dict] = queue.SimpleQueue()
         self.paused = False
         self.quit = False
@@ -224,7 +225,8 @@ class Engine:
                 raise FileNotFoundError(f"no existe: {file}")
             out = out_dir_for(audio, sha256_file(audio), self.out_root)
             r = self.generate(audio, self.out_root, device=self.device, model_path=self.model, out_dir=out,
-                              lyrics=self.lyrics, on_step=lambda d, s: self.on_step(file, d, s))
+                              lyrics=self.lyrics, drop_stems=not self.keep_stems,
+                              on_step=lambda d, s: self.on_step(file, d, s))
         except Quit:
             raise
         except Exception as e:  # noqa: BLE001 - una canción rara (o sin memoria de vídeo) no para la cola
@@ -314,6 +316,7 @@ def main() -> int:
     parser.add_argument("--model", type=Path, help="modelo OnsetNet; sin él (o si no existe), las reglas")
     parser.add_argument("--device", default="auto", choices=("auto", "cuda", "cpu"))
     parser.add_argument("--no-lyrics", action="store_true")
+    parser.add_argument("--keep-stems", action="store_true", help="guardar las pistas de Demucs (~50 MB por canción)")
     args = parser.parse_args()
 
     out = sys.stdout
@@ -329,7 +332,8 @@ def main() -> int:
     ensure_ffmpeg(args.queue.parent)
     device = pick_device(args.device)
     model = args.model if args.model and args.model.is_file() else None
-    engine = Engine(JobQueue(args.queue), args.out, model, device, emit, lyrics=not args.no_lyrics)
+    engine = Engine(JobQueue(args.queue), args.out, model, device, emit, lyrics=not args.no_lyrics,
+                    keep_stems=args.keep_stems)
     emit({"event": "ready", "device": device, "version": __version__, "model": model.name if model else None})
     threading.Thread(target=_read_commands, args=(engine,), daemon=True, name="órdenes").start()
     t0 = time.perf_counter()
