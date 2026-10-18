@@ -3,6 +3,7 @@
 - Strum arriba/abajo: mover. Verde, + o Intro: elegir. Rojo, − o Retroceso: volver.
 - Una opción con valor (change) se elige para editarla: el strum la cambia (arriba sube) y elegir o
   volver deja de editar. Los cambios se aplican en el momento.
+- Las listas largas se ven por ventanas de WINDOW opciones; amarillo / azul saltan PAGE.
 """
 
 from __future__ import annotations
@@ -10,12 +11,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+WINDOW = 11
+PAGE = 10
+
 
 @dataclass
 class Option:
     label: str
     action: Callable[[], None] | None = None  # al elegirla
-    value: Callable[[], str] | None = None  # texto del valor actual
+    value: Callable[[], str] | str | None = None  # texto del valor (fijo o calculado al pintar)
     change: Callable[[int], None] | None = None  # +1 sube, -1 baja
 
     @property
@@ -43,6 +47,15 @@ class Menu:
         else:
             self.sel = (self.sel + direction) % len(self.options)
 
+    def page(self, direction: int) -> None:
+        """Salto largo (sin dar la vuelta), para las listas largas."""
+        if not self.editing:
+            self.sel = max(0, min(len(self.options) - 1, self.sel + direction * PAGE))
+
+    @property
+    def long(self) -> bool:
+        return len(self.options) > WINDOW
+
     def select(self) -> None:
         opt = self.options[self.sel]
         if opt.editable:
@@ -58,9 +71,14 @@ class Menu:
         return False
 
     def view(self) -> dict:
-        return {"title": self.title, "body": self.body, "sel": self.sel, "editing": self.editing,
-                "items": [o.label for o in self.options],
-                "values": [o.value() if o.value else "" for o in self.options]}
+        """Lo que pinta QML: solo la ventana de opciones alrededor de la elegida."""
+        n = len(self.options)
+        start = max(0, min(self.sel - WINDOW // 2, n - WINDOW))
+        shown = self.options[start:start + WINDOW]
+        return {"title": self.title, "body": self.body, "sel": self.sel - start, "editing": self.editing,
+                "items": [o.label for o in shown], "values": [o.value() if callable(o.value) else (o.value or "") for o in shown],
+                "above": start > 0, "below": start + WINDOW < n,
+                "position": f"{self.sel + 1} / {n}" if self.long else ""}
 
 
 def stepper(get: Callable[[], float], set_: Callable[[float], None], step: float, lo: float, hi: float
@@ -72,9 +90,9 @@ def stepper(get: Callable[[], float], set_: Callable[[float], None], step: float
 
 
 def cycler(values: list, get: Callable[[], object], set_: Callable[[object], None]) -> Callable[[int], None]:
-    """change() que recorre una lista (sin dar la vuelta)."""
+    """change() que recorre una lista dando la vuelta (Sí -> No -> Sí...)."""
     def change(d: int) -> None:
         cur = get()
         i = values.index(cur) if cur in values else 0
-        set_(values[min(len(values) - 1, max(0, i + d))])
+        set_(values[(i + d) % len(values)])
     return change

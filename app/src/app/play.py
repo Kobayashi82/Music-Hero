@@ -1,6 +1,7 @@
-"""play canción.mp3 | carpeta de chart -> juega la canción en el overlay, con el reproductor propio (fase 3).
+"""play [canción.mp3 | carpeta de chart] -> juega en el overlay, con el reproductor propio (fase 3).
 
 Uso:
+    uv run --project app play            (abre el selector de canciones, en la última que jugaste)
     uv run --project app play "D:/Programas/Multimedia/Musicas/Queen/Greatest Hits II/Queen - Hammer to Fall.mp3"
     uv run --project app play "out/charts/Queen - Hammer to Fall" --difficulty hard
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import random
 import signal
 import sys
 import time
@@ -27,6 +29,7 @@ from .chart import DIFF_NAMES, DIFFS, Chart, find_chart
 from .config import Config
 from .gameplay import HIT, MISSED, SKIPPED, Game
 from .inputs import Inputs
+from .library import Entry, group, scan
 from .menu import Menu, Option, cycler, stepper
 from .player import Player
 from .records import Play, Records
@@ -42,17 +45,18 @@ TOAST_S = 2.5
 SIDE_MARGIN = 640  # la ventana es la autopista más esto (la mitad a cada lado): sitio para el marcador
 CALIB_LANE = 2  # las notas de la calibración bajan por el carril amarillo (el del centro)
 MENU_HINT = "Strum: mover · Verde / +: elegir · Rojo / −: volver"
+LONG_HINT = MENU_HINT + " · Amarillo / Azul: saltar 10"
 POSITIONS = {"left": "Izquierda", "center": "Centro", "right": "Derecha"}
 
 
 class Session(QObject):
-    def __init__(self, chart: Chart, cfg: Config, difficulty: str, inputs: Inputs, view: QQuickView,
+    def __init__(self, chart: Chart, cfg: Config, difficulty: str | None, inputs: Inputs, view: QQuickView,
                  records: Records | None = None):
         super().__init__()
-        self.chart, self.cfg, self.inputs, self.view = chart, cfg, inputs, view
+        self.cfg, self.inputs, self.view = cfg, inputs, view
         self.records = records or Records()
-        self.difficulty = difficulty if difficulty in chart.difficulties else next(iter(chart.difficulties))
-        self.player = Player(chart.audio_file, cfg.audio_offset_ms, LEAD_IN_MS, cfg.volume)
+        self.player: Player | None = None
+        self._tree: dict[str, dict[str, list[Entry]]] | None = None
         self.held = [False] * 5
         self.flash_t = [0.0] * 5
         self.miss_t = 0.0
@@ -69,8 +73,24 @@ class Session(QObject):
         self.autoplay = False
         self.partial = False  # la partida no cuenta para récords (automático o empezada a mitad)
         self.record_toast = False  # ya se avisó de que se ha superado el récord en esta partida
+        self.load_song(chart, difficulty)
+
+    def load_song(self, chart: Chart, difficulty: str | None = None) -> None:
+        """Pone esta canción (al empezar o desde el selector): su dificultad es la pedida, la última elegida
+        en ella o la de por defecto."""
+        self.stop_calibration()
+        player = Player(chart.audio_file, self.cfg.audio_offset_ms, LEAD_IN_MS, self.cfg.volume)
+        if self.player:
+            self.player.close()
+        self.chart, self.player = chart, player
+        d = difficulty or self.records.difficulty(chart.audio_sha256) or self.cfg.difficulty
+        self.difficulty = d if d in chart.difficulties else next(iter(chart.difficulties))
         self.beats = chart.beats
         self.beat_times = [b[0] for b in self.beats]
+        self.menus.clear()
+        self.results, self.resume_at = "", None
+        self.flash_t, self.miss_lane_t, self.miss_t = [0.0] * 5, [0.0] * 5, 0.0
+        self.records.set_last(chart.audio_sha256)
         self.new_game()
         self.player.play()
 
@@ -165,9 +185,85 @@ class Session(QObject):
                 f"{' · sin fallos' if best.full_combo else ''}")
         return line + f"<br>{st.get('plays', 0)} partidas · el {fmt_date(best.date)}"
 
+    # ---------- selector de canciones ----------
+
+    def tree(self) -> dict[str, dict[str, list[Entry]]]:
+        if self._tree is None:
+            self._tree = group(scan())
+        return self._tree
+
+    def song_value(self, e: Entry) -> str:
+        """A la derecha de cada canción: su récord (en la dificultad que se le pondría) y la duración."""
+        d = self.records.difficulty(e.sha) or self.cfg.difficulty
+        best = self.records.best(e.sha, d)
+        length = f"{e.duration_ms // 60000}:{e.duration_ms // 1000 % 60:02d}"
+        return f"{fmt_int(best.score)} · {length}" if best else length
+
+    def open_selector(self) -> None:
+        """Artistas -> álbumes -> canciones, abierto ya en la canción que suena (rojo / − va subiendo)."""
+        self.pause()
+        tree = self.tree()
+        if not tree:
+            self.toast("No hay canciones con chart en out/charts")
+            return
+        here = next(((a, al, i) for a, albums in tree.items() for al, songs in albums.items()
+                     for i, e in enumerate(songs) if e.sha == self.chart.audio_sha256), None)
+        total = sum(len(s) for albums in tree.values() for s in albums.values())
+        root = Menu("Canciones", [Option("Al azar", self.play_random)] + [
+            Option(a, lambda a=a: self.open_artist(a), value=str(sum(len(s) for s in tree[a].values())))
+            for a in tree], body=f"{total} canciones de {len(tree)} artistas")
+        self.menus.append(root)
+        if here:
+            artist, album, i = here
+            root.sel = 1 + list(tree).index(artist)
+            self.open_artist(artist, album, i)
+
+    def open_artist(self, artist: str, album: str | None = None, song: int = 0) -> None:
+        albums = self.tree()[artist]
+        if len(albums) == 1:
+            self.open_album(artist, next(iter(albums)), song)
+            return
+        menu = Menu(artist, [Option(al, lambda al=al: self.open_album(artist, al), value=str(len(albums[al])))
+                             for al in albums], body=f"{len(albums)} álbumes")
+        self.menus.append(menu)
+        if album in albums:
+            menu.sel = list(albums).index(album)
+            self.open_album(artist, album, song)
+
+    def open_album(self, artist: str, album: str, song: int = 0) -> None:
+        songs = self.tree()[artist][album]
+        menu = Menu(album, [Option(e.title, lambda e=e: self.choose(e), value=self.song_value(e)) for e in songs],
+                    body=f"{artist} · {len(songs)} canciones")
+        menu.sel = min(song, len(songs) - 1)
+        self.menus.append(menu)
+
+    def choose(self, e: Entry) -> None:
+        if e.sha == self.chart.audio_sha256:
+            self.restart()
+            return
+        self.toast(f"Cargando {e.title}…", 10)
+        QTimer.singleShot(30, lambda: self._load_entry(e))  # deja pintar el aviso antes de leer el audio
+
+    def _load_entry(self, e: Entry) -> None:
+        try:
+            chart = Chart.load(Path(e.folder))
+            chart.audio_file = Path(e.audio)
+            self.load_song(chart)
+        except Exception as err:  # noqa: BLE001 - una canción rota no tira el juego
+            self.toast(f"No se pudo abrir {e.title}: {err}", 6)
+            return
+        self.toast(f"{chart.artist} – {chart.title} · {DIFF_NAMES[self.difficulty]}")
+
+    def play_random(self) -> None:
+        songs = [e for albums in self.tree().values() for s in albums.values() for e in s
+                 if e.sha != self.chart.audio_sha256]
+        if songs:
+            self.choose(random.choice(songs))
+
     def pause_menu(self) -> Menu:
         return Menu("Pausa", [
             Option("Continuar", self.resume),
+            Option("Cambiar canción", self.open_selector),
             self.difficulty_option(),
             self.autoplay_option(),
             Option("Reiniciar", self.restart),
@@ -179,6 +275,7 @@ class Session(QObject):
     def results_menu(self) -> Menu:
         return Menu("Fin de la canción", [
             Option("Otra vez", self.restart),
+            Option("Otra canción", self.open_selector),
             self.difficulty_option(),
             self.autoplay_option(),
             Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
@@ -324,6 +421,8 @@ class Session(QObject):
             menu.move(ev.value)
         elif ev.kind == "fret" and ev.down and ev.value in (0, 1):
             menu.select() if ev.value == 0 else self.menu_back()
+        elif ev.kind == "fret" and ev.down and ev.value in (2, 3):
+            menu.page(-1 if ev.value == 2 else 1)
         elif ev.kind == "control":
             if ev.value in ("start", "enter"):
                 menu.select()
@@ -420,7 +519,8 @@ class Session(QObject):
             "title": f"{self.chart.artist} – {self.chart.title}", "difficulty": DIFF_NAMES[self.difficulty],
             "autoplay": self.autoplay, "best": self.best_score, "partial": self.partial,
             "progress": max(0.0, min(1.0, t / max(1, self.chart.duration_ms))),
-            "countdown": countdown, "menu": menu, "menuHint": MENU_HINT if menu else "", "calib": calib,
+            "countdown": countdown, "menu": menu, "calib": calib,
+            "menuHint": (LONG_HINT if self.menus[-1].long else MENU_HINT) if menu else "",
             "toast": self.toast_text if now < self.toast_until else "",
             "message": self.message, "opacity": self.cfg.opacity, "hwWidth": self.cfg.highway_width,
         }
@@ -574,7 +674,8 @@ def resolve(path: Path) -> Chart:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("song", type=Path, help="audio (busca su chart en out/charts) o carpeta de chart")
+    parser.add_argument("song", type=Path, nargs="?",
+                        help="audio (busca su chart en out/charts) o carpeta de chart; sin ella, el selector")
     parser.add_argument("--difficulty", choices=DIFFS,
                         help="por defecto, la última elegida en esa canción o, si no, la de por defecto (Ajustes)")
     parser.add_argument("--speed", type=float, help="velocidad de las notas (1 = normal); el menú la guarda")
@@ -588,7 +689,16 @@ def main() -> int:
     cfg = Config.load()
     if args.speed:
         cfg.note_speed = args.speed
-    chart = resolve(args.song)
+    records = Records()
+    if args.song:
+        chart = resolve(args.song)
+    else:  # el selector, empezando por la última canción jugada
+        entries = scan()
+        if not entries:
+            sys.exit("No hay canciones con chart: genéralas con uv run --project generator generate <carpeta>")
+        e = next((e for e in entries if e.sha == records.last), entries[0])
+        chart = Chart.load(Path(e.folder))
+        chart.audio_file = Path(e.audio)
 
     QQuickWindow.setGraphicsApi(QSGRendererInterface.GraphicsApi.Direct3D11)
     fmt = QSurfaceFormat.defaultFormat()
@@ -603,10 +713,10 @@ def main() -> int:
     inputs.set_game_keys(True)
     for e in inputs.errors:
         print("aviso:", e)
-    records = Records()
-    difficulty = args.difficulty or records.difficulty(chart.audio_sha256) or cfg.difficulty
-    bridge.session = Session(chart, cfg, difficulty, inputs, view, records)
+    bridge.session = Session(chart, cfg, args.difficulty, inputs, view, records)
     bridge.session.set_autoplay(args.autoplay)
+    if not args.song:
+        bridge.session.open_selector()
 
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     keepalive = QTimer()  # deja que Python atienda Ctrl+C

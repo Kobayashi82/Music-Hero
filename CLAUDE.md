@@ -18,6 +18,6 @@ Ver ROADMAP.md para fases y criterios de terminado.
 - Generar charts: `uv run --project generator generate "<canción.mp3 o carpeta>" [--jobs 2] [--clonehero]` → `out/charts/<canción>/` (chart.json, preview.html, stems/, clonehero/). Usa `models/best.pt` (copia del mejor modelo, fuera de git; `--no-model` = reglas); salta lo ya hecho con el mismo audio, versión y modelo (`--force` lo rehace).
 - Charts humanas de la biblioteca: `generate` usa sola la de `data/encore_library.json` si está bajada en `out/encore/` y encaja con el audio (si no, el modelo; `--no-human` lo desactiva).
 - Usar una chart humana (Chorus Encore .sng o carpeta): `uv run --project generator generate "<canción.mp3>" --human <chart.sng>`
-- Jugar (fase 3, reproductor propio): `uv run --project app play "<canción.mp3 o carpeta de chart>" [--difficulty hard]`. Tests de la app: `uv run --project app --with pytest pytest app/tests`
+- Jugar (fase 3, reproductor propio): `uv run --project app play` (selector de canciones) o `play "<canción.mp3 o carpeta de chart>" [--difficulty hard]`. Récords, dificultad por canción, índice y config en `%APPDATA%/MusicHero/`. Tests de la app: `uv run --project app --with pytest pytest app/tests`
 - Tests (sin GPU): `uv run --project generator --with pytest --with jsonschema pytest tests`
 - Música del usuario: `D:\Programas\Multimedia\Musicas` (reproductor: AIMP)

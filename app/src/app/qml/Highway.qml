@@ -347,6 +347,8 @@ Item {
             Text { width: parent.width; text: root.menuOpen ? root.f.menu.body : ""; visible: text !== ""
                    color: "#ddffffff"; font.pixelSize: 17; wrapMode: Text.WordWrap; textFormat: Text.StyledText
                    bottomPadding: 8 }
+            Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; height: 16
+                   text: root.menuOpen && root.f.menu.above ? "▲" : ""; color: "#88ffffff"; font.pixelSize: 13 }
             Repeater {
                 model: root.menuOpen ? root.f.menu.items.length : 0
                 Rectangle {
@@ -364,6 +366,10 @@ Item {
                            color: parent.editing ? "#2ecc40" : "#ccffffff"; font.pixelSize: 20; font.bold: parent.editing }
                 }
             }
+            Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; height: 16
+                   text: root.menuOpen && root.f.menu.below ? "▼" : ""; color: "#88ffffff"; font.pixelSize: 13 }
+            Text { width: parent.width; horizontalAlignment: Text.AlignRight; visible: text !== ""
+                   text: root.menuOpen ? root.f.menu.position : ""; color: "#88ffffff"; font.pixelSize: 13 }
             Text { width: parent.width; topPadding: 10; horizontalAlignment: Text.AlignHCenter
                    text: root.menuOpen && root.f.menu.editing ? "Strum: cambiar · Verde / + o Rojo / −: listo"
                                                               : root.f.menuHint

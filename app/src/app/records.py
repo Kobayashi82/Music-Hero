@@ -65,6 +65,17 @@ class Records:
         self._song(sha, title, artist)["difficulty"] = difficulty
         self.save()
 
+    # ---------- última canción ----------
+
+    @property
+    def last(self) -> str | None:
+        return self.data.get("last")
+
+    def set_last(self, sha: str) -> None:
+        if self.data.get("last") != sha:
+            self.data["last"] = sha
+            self.save()
+
     # ---------- partidas ----------
 
     def stats(self, sha: str, difficulty: str) -> dict:

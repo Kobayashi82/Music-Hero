@@ -32,12 +32,14 @@ def test_mover_elegir_y_editar():
     assert m.view()["values"] == ["", "1.1"]
 
 
-def test_cycler_no_da_la_vuelta():
+def test_cycler_da_la_vuelta():
     box = {"d": "easy"}
     ch = cycler(["easy", "medium", "hard"], lambda: box["d"], lambda v: box.update(d=v))
     ch(-1)
+    assert box["d"] == "hard"
+    ch(1)
     assert box["d"] == "easy"
-    ch(1), ch(1), ch(1)
+    ch(1), ch(1)
     assert box["d"] == "hard"
 
 
