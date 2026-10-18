@@ -3,7 +3,8 @@
 Cada fuente corre en su hilo y deja eventos con su instante de time.perf_counter() en una cola; el
 juego los pasa a ms de la canción con el reloj del reproductor (Player.position_ms(at)).
 
-Teclado, con el juego activo (las teclas no llegan a la app que tenga el foco):
+Teclado, con el juego activo (las teclas no llegan a la app que tenga el foco). Estas son las de por defecto
+(ACTIONS); se cambian en Ajustes → Teclas y se guardan en config.keys:
     A S D F G          trastes verde, rojo, amarillo, azul, naranja
     flechas arriba/abajo, Intro   strum (en los menús: mover; Intro elige)
     Espacio            menú (pausa)   Retroceso   reiniciar la canción (en los menús: volver)
@@ -25,25 +26,59 @@ from dataclasses import dataclass
 
 from . import win32
 
-FRET_KEYS = ("a", "s", "d", "f", "g")
-STRUM_KEYS = ("up", "down")
-CONTROL_KEYS = {"space": "pause", "backspace": "restart", "tab": "difficulty", "enter": "enter"}
+# (acción, nombre en Ajustes, tecla por defecto, evento que da). Las globales funcionan siempre (también con el
+# juego oculto) y admiten Ctrl/Alt/Mayús/Win; las del juego, solo con el juego a la vista y sin modificadores.
+ACTIONS = [
+    ("toggle", "Mostrar / ocultar", "ctrl+alt+h", ("control", "toggle")),
+    ("quit", "Salir", "ctrl+alt+q", ("control", "quit")),
+    ("fret0", "Traste verde", "a", ("fret", 0)),
+    ("fret1", "Traste rojo", "s", ("fret", 1)),
+    ("fret2", "Traste amarillo", "d", ("fret", 2)),
+    ("fret3", "Traste azul", "f", ("fret", 3)),
+    ("fret4", "Traste naranja", "g", ("fret", 4)),
+    ("strum_up", "Strum arriba", "up", ("strum", -1)),
+    ("strum_down", "Strum abajo", "down", ("strum", 1)),
+    ("pause", "Menú (pausa)", "space", ("control", "pause")),
+    ("restart", "Reiniciar / volver", "backspace", ("control", "restart")),
+    ("difficulty", "Cambiar de dificultad", "tab", ("control", "difficulty")),
+    ("enter", "Elegir", "enter", ("control", "enter")),
+]
+GLOBAL_ACTIONS = ("toggle", "quit")
+DEFAULT_KEYS = {a: key for a, _, key, _ in ACTIONS}
+ACTION_NAMES = {a: name for a, name, _, _ in ACTIONS}
+ACTION_EVENTS = {a: ev for a, _, _, ev in ACTIONS}
 TEXT_CHARS = "abcdefghijklmnñopqrstuvwxyz0123456789 "
-GLOBAL_HOTKEYS = {"toggle": "ctrl+alt+h", "quit": "ctrl+alt+q"}
+
+
+def keymap(custom: dict[str, str] | None) -> dict[str, str]:
+    """Las teclas por defecto con las cambiadas encima (las acciones desconocidas se ignoran)."""
+    return DEFAULT_KEYS | {a: k for a, k in (custom or {}).items() if a in DEFAULT_KEYS}
+
+
+def assign(custom: dict[str, str] | None, action: str, combo: str) -> dict[str, str]:
+    """Pone combo a action; si otra acción la tenía, se intercambian. Devuelve solo lo que difiere de lo de
+    por defecto (lo que se guarda en la config)."""
+    full = keymap(custom)
+    other = next((a for a, k in full.items() if k == combo and a != action), None)
+    if other:
+        full[other] = full[action]
+    full[action] = combo
+    return {a: k for a, k in full.items() if k != DEFAULT_KEYS[a]}
 
 
 @dataclass
 class InputEvent:
     t: float  # time.perf_counter()
-    kind: str  # "fret" | "strum" | "control" | "char"
-    value: int | str = 0  # traste 0..4, dirección del strum (-1 arriba, 1 abajo), nombre del control o letra
+    kind: str  # "fret" | "strum" | "control" | "char" | "captured" (tecla atrapada para Ajustes) | "error"
+    value: int | str = 0  # traste 0..4, dirección del strum (-1 arriba, 1 abajo), nombre del control, letra...
     down: bool = True  # False: se suelta (trastes y strum; mantener el strum desplaza los menús)
 
 
 class Inputs:
-    def __init__(self, hotkeys: dict[str, str] | None = None):
+    def __init__(self, keys: dict[str, str] | None = None):
+        """keys: las teclas cambiadas en Ajustes (config.keys); el resto, las de por defecto."""
         self.events: queue.SimpleQueue[InputEvent] = queue.SimpleQueue()
-        self.keyboard = KeyboardSource(self.events, {**GLOBAL_HOTKEYS, **(hotkeys or {})})
+        self.keyboard = KeyboardSource(self.events, keymap(keys))
         self.guitar = GuitarSource(self.events)
         self.errors: list[str] = []
 
@@ -62,6 +97,16 @@ class Inputs:
     def set_text_mode(self, enabled: bool) -> None:
         self.keyboard.set_text_mode(enabled)
 
+    def set_keys(self, custom: dict[str, str]) -> None:
+        self.keyboard.set_keys(keymap(custom))
+
+    def capture_key(self, with_mods: bool) -> None:
+        """La próxima tecla llega como InputEvent("captured", "ctrl+alt+h") ("" si Esc) y no la recibe nadie más."""
+        self.keyboard.capture(with_mods)
+
+    def cancel_capture(self) -> None:
+        self.keyboard.capture(None)
+
     def drain(self) -> list[InputEvent]:
         out = []
         while True:
@@ -76,12 +121,16 @@ class KeyboardSource:
 
     _SET_GAME_KEYS = win32.WM_APP + 1
     _SET_TEXT_MODE = win32.WM_APP + 2
+    _SET_KEYS = win32.WM_APP + 3
+    _CAPTURE = win32.WM_APP + 4  # wParam: 0 sin modificadores, 1 con ellos, 2 cancelar
 
-    def __init__(self, events: queue.SimpleQueue, hotkeys: dict[str, str]):
+    def __init__(self, events: queue.SimpleQueue, keys: dict[str, str]):
         self.events = events
-        self.hotkeys = hotkeys
+        self.keys = keys  # acción -> tecla ("ctrl+alt+h", "a"...)
         self.errors: list[str] = []
         self._ids: dict[int, tuple[str, int | str, int]] = {}  # id -> (tipo, valor, tecla virtual)
+        self._new_keys: dict[str, str] | None = None
+        self._catcher: win32.KeyCatcher | None = None
         self._thread_id = 0
         self._game = False
         self._text = False
@@ -101,8 +150,33 @@ class KeyboardSource:
         win32.user32.PostThreadMessageW(self._thread_id, self._SET_GAME_KEYS, int(enabled), 0)
 
     def set_text_mode(self, enabled: bool) -> None:
-        """Buscador: las letras (A S D F G incluidas) y Espacio escriben en vez de tocar o pausar."""
+        """Buscador: las letras (y números y Espacio) escriben en vez de tocar o pausar."""
         win32.user32.PostThreadMessageW(self._thread_id, self._SET_TEXT_MODE, int(enabled), 0)
+
+    def set_keys(self, keys: dict[str, str]) -> None:
+        self._new_keys = dict(keys)
+        win32.user32.PostThreadMessageW(self._thread_id, self._SET_KEYS, 0, 0)
+
+    def capture(self, with_mods: bool | None) -> None:
+        """Atrapar la próxima tecla (None: dejar de esperarla)."""
+        win32.user32.PostThreadMessageW(self._thread_id, self._CAPTURE, 2 if with_mods is None else int(with_mods), 0)
+
+    def _report(self, action: str) -> None:
+        text = (f"No se pudo usar {win32.combo_label(self.keys[action])} para «{ACTION_NAMES[action]}»: "
+                "la usa otra aplicación")
+        self.errors.append(text)
+        self.events.put(InputEvent(time.perf_counter(), "error", text))
+
+    def _register_globals(self) -> None:
+        for hk_id in [i for i in self._ids if i < 100]:
+            win32.user32.UnregisterHotKey(None, hk_id)
+            del self._ids[hk_id]
+        for i, action in enumerate(GLOBAL_ACTIONS):
+            mods, vk = win32.parse_hotkey(self.keys[action])
+            if win32.user32.RegisterHotKey(None, 1 + i, mods, vk):
+                self._ids[1 + i] = (*ACTION_EVENTS[action], vk)
+            else:
+                self._report(action)
 
     def _sync_keys(self) -> None:
         """Registra las teclas del juego (y las de escribir en modo texto) según el estado."""
@@ -111,29 +185,29 @@ class KeyboardSource:
             del self._ids[hk_id]
         if not self._game:
             return
-        keys = {110 + i: ("strum", -1 if k == "up" else 1, win32.vk_of(k)) for i, k in enumerate(STRUM_KEYS)}
-        keys |= {120 + i: ("control", name, win32.vk_of(k)) for i, (k, name) in enumerate(CONTROL_KEYS.items())
-                 if not (self._text and k == "space")}
+        text_vks = {vk for c in TEXT_CHARS if (vk := win32.vk_of_char(c))} if self._text else set()
+        keys = {}
+        for i, (action, _, _, (kind, value)) in enumerate(ACTIONS):
+            vk = win32.vk_of(self.keys[action].split("+")[-1])
+            if action not in GLOBAL_ACTIONS and vk not in text_vks:  # en el buscador, lo que escribe, escribe
+                keys[100 + i] = (kind, value, vk, action)
         if self._text:
-            keys |= {200 + i: ("char", c, vk) for i, c in enumerate(TEXT_CHARS) if (vk := win32.vk_of_char(c))}
-        else:
-            keys |= {100 + i: ("fret", i, win32.vk_of(k)) for i, k in enumerate(FRET_KEYS)}
-        for hk_id, (kind, value, vk) in keys.items():
+            keys |= {200 + i: ("char", c, vk, "") for i, c in enumerate(TEXT_CHARS) if (vk := win32.vk_of_char(c))}
+        for hk_id, (kind, value, vk, action) in keys.items():
             if win32.user32.RegisterHotKey(None, hk_id, win32.MOD_NOREPEAT, vk):
                 self._ids[hk_id] = (kind, value, vk)
             elif kind != "char":
-                self.errors.append(f"la tecla {value!r} ya la usa otra aplicación")
+                self._report(action)
+
+    def _captured(self, combo: str) -> None:
+        self._catcher = None
+        self.events.put(InputEvent(time.perf_counter(), "captured", combo))
 
     def _run(self) -> None:
         self._thread_id = win32.kernel32.GetCurrentThreadId()
         msg = wintypes.MSG()
         win32.user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)  # crea la cola de mensajes del hilo
-        for i, (name, combo) in enumerate(self.hotkeys.items()):
-            mods, vk = win32.parse_hotkey(combo)
-            if win32.user32.RegisterHotKey(None, 1 + i, mods, vk):
-                self._ids[1 + i] = ("control", name, vk)
-            else:
-                self.errors.append(f"no se pudo registrar {combo} (¿lo usa otra app?)")
+        self._register_globals()
         self._ready.set()
         win32.winmm.timeBeginPeriod(1)
         held: dict[int, tuple[str, int]] = {}  # tecla virtual -> (traste o strum, valor), para ver la suelta
@@ -143,15 +217,24 @@ class KeyboardSource:
                     now = time.perf_counter()
                     if msg.message == win32.WM_QUIT:
                         return
-                    if msg.message in (self._SET_GAME_KEYS, self._SET_TEXT_MODE):
+                    if msg.message in (self._SET_GAME_KEYS, self._SET_TEXT_MODE, self._SET_KEYS):
                         if msg.message == self._SET_GAME_KEYS:
                             self._game = bool(msg.wParam)
-                        else:
+                        elif msg.message == self._SET_TEXT_MODE:
                             self._text = bool(msg.wParam)
+                        elif self._new_keys is not None:
+                            self.keys, self._new_keys = self._new_keys, None
+                            self._register_globals()
                         for kind, value in held.values():  # lo pulsado se suelta: no se queda pegado
                             self.events.put(InputEvent(now, kind, value, False))
                         held.clear()
                         self._sync_keys()
+                    elif msg.message == self._CAPTURE:
+                        if self._catcher:
+                            self._catcher.close()
+                            self._catcher = None
+                        if msg.wParam != 2:  # mientras espera, el gancho se queda todas las teclas
+                            self._catcher = win32.KeyCatcher(bool(msg.wParam), self._captured)
                     elif msg.message == win32.WM_HOTKEY and msg.wParam in self._ids:
                         kind, value, vk = self._ids[msg.wParam]
                         self.events.put(InputEvent(now, kind, value, True))
@@ -162,6 +245,8 @@ class KeyboardSource:
                     self.events.put(InputEvent(now, *held.pop(vk), False))
                 time.sleep(0.001)
         finally:
+            if self._catcher:
+                self._catcher.close()
             for hk_id in list(self._ids):
                 win32.user32.UnregisterHotKey(None, hk_id)
             win32.winmm.timeEndPeriod(1)

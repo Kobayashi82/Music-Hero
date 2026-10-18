@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 CONFIG_FILE = Path(os.environ.get("APPDATA", Path.home())) / "MusicHero" / "config.json"
@@ -23,6 +23,7 @@ class Config:
     lyrics: bool = True  # letra bajo la autopista (sube la autopista para dejarle sitio)
     hud_side: str = "right"  # marcador a la izquierda o a la derecha de la autopista
     aimp_offset_ms: float = 230.0  # lo que AIMP tarda en hacer sonar su posición (su búfer); el juego lo mide solo
+    keys: dict = field(default_factory=dict)  # teclas cambiadas en Ajustes (acción -> tecla; ver inputs.ACTIONS)
 
     @classmethod
     def load(cls) -> Config:

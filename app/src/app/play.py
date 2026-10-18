@@ -21,6 +21,7 @@ import argparse
 import bisect
 import os
 import random
+import re
 import shutil
 import signal
 import subprocess
@@ -29,16 +30,17 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Slot
-from PySide6.QtGui import QColor, QGuiApplication, QSurfaceFormat
+from PySide6.QtCore import QObject, QPointF, Qt, QTimer, QUrl, Slot
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPixmap, QPolygonF, QSurfaceFormat
 from PySide6.QtQuick import QQuickView, QQuickWindow, QSGRendererInterface
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import calibration, loopback, win32
 from .aimp import CMD_PAUSE, PLAYING, Aimp, AimpPlayer, Track
 from .chart import DIFF_NAMES, DIFFS, ROOT, Chart, find_chart
 from .config import Config
 from .gameplay import HIT, MISSED, SKIPPED, Game
-from .inputs import Inputs
+from .inputs import ACTION_NAMES, ACTIONS, GLOBAL_ACTIONS, Inputs, assign, keymap
 from .library import Entry, group, scan, search
 from .lyrics import Lyrics
 from .menu import Menu, Option, SearchMenu, cycler, stepper
@@ -100,6 +102,9 @@ class Session(QObject):
         self.toast_text, self.toast_until = "", 0.0
         self.guitar_connected: bool | None = None
         self.text_mode = False  # el teclado escribe (buscador abierto)
+        self.capturing: str | None = None  # acción esperando su tecla nueva (Ajustes → Teclas)
+        self.tray: QSystemTrayIcon | None = None  # icono junto al reloj (main)
+        self.hidden_hint = False  # ya se avisó de que oculto sigue en el icono
         self.strum_hold: tuple[int, float, float] | None = None  # strum mantenido en un menú: (dirección, desde, siguiente)
         self.message = "; ".join(inputs.errors)
         self.autoplay = False
@@ -189,6 +194,11 @@ class Session(QObject):
                 self.pause()
             self.inputs.set_game_keys(False)
             self.view.hide()
+            if self.tray and not self.hidden_hint:
+                self.hidden_hint = True
+                key = win32.combo_label(keymap(self.cfg.keys)["toggle"])
+                self.tray.showMessage("Music Hero sigue aquí", f"{key} o un clic en este icono para volver; "
+                                      "para salir, clic derecho en el icono.", QSystemTrayIcon.MessageIcon.NoIcon, 4000)
         else:
             if self.follow and not self.waiting:
                 self.resync()  # oculto no se pinta ni se juzga: se sigue desde donde va AIMP
@@ -490,8 +500,12 @@ class Session(QObject):
             Option("Reiniciar", self.restart),
             Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
             Option("Calibrar el retardo", self.start_calibration),
-            Option("Salir", QGuiApplication.quit),
+            self.leave_option(),
         ], body=self.pause_body, on_back=self.resume)
+
+    def leave_option(self) -> Option:
+        """Con el icono junto al reloj, ocultar (se sale desde el icono); sin él, salir."""
+        return Option("Ocultar", self.toggle_visible) if self.tray else Option("Salir", QGuiApplication.quit)
 
     def pause_body(self) -> str:
         if self.waiting:
@@ -509,7 +523,7 @@ class Session(QObject):
             self.autoplay_option(),
             Option("Ajustes", lambda: self.menus.append(self.settings_menu())),
             Option("Calibrar el retardo", self.start_calibration),
-            Option("Salir", QGuiApplication.quit),
+            self.leave_option(),
         ], body=lambda: self.results)
 
     def settings_menu(self) -> Menu:
@@ -553,6 +567,7 @@ class Session(QObject):
             Option("Marcador", value=lambda: SIDES.get(cfg.hud_side, cfg.hud_side),
                    change=cycler(list(SIDES), lambda: cfg.hud_side,
                                  lambda v: (setattr(cfg, "hud_side", v), cfg.save()))),
+            Option("Teclas", lambda: self.menus.append(self.keys_menu())),
             Option("Letra", value=lambda: "Sí" if cfg.lyrics else "No",
                    change=cycler([False, True], lambda: cfg.lyrics,
                                  lambda v: (setattr(cfg, "lyrics", v), cfg.save()))),
@@ -630,13 +645,63 @@ class Session(QObject):
     def menus_pop(self) -> None:
         self.menus.pop()
 
+    # ---------- teclas ----------
+
+    def keys_menu(self) -> Menu:
+        def value(action: str):
+            return lambda: "…" if self.capturing == action else win32.combo_label(keymap(self.cfg.keys)[action])
+
+        def reset() -> None:
+            self.cfg.keys = {}
+            self.cfg.save()
+            self.inputs.set_keys({})
+            self.toast("Teclas de siempre")
+        return Menu("Teclas", [Option(name, lambda a=action: self.capture_key(a), value=value(action))
+                               for action, name, _, _ in ACTIONS]
+                    + [Option("Restablecer las de siempre", reset), Option("Volver", self.menu_back)],
+                    body=self.keys_body)
+
+    def keys_body(self) -> str:
+        if self.capturing:
+            mods = " (con Ctrl, Alt o Win)" if self.capturing in GLOBAL_ACTIONS else ""
+            return f"Pulsa la tecla{mods} para <b>{ACTION_NAMES[self.capturing]}</b>.<br>Esc o rojo: cancelar"
+        return ("Elige una acción y pulsa la tecla nueva; si otra la usaba, se intercambian.<br>"
+                "Mostrar / ocultar y Salir funcionan siempre, también con el juego oculto.")
+
+    def capture_key(self, action: str) -> None:
+        self.capturing = action
+        self.inputs.capture_key(action in GLOBAL_ACTIONS)
+
+    def key_captured(self, combo: str) -> None:
+        action, self.capturing = self.capturing, None
+        if not action or not combo:
+            return  # Esc: cancelado
+        name = ACTION_NAMES[action]
+        if action in GLOBAL_ACTIONS and not ({"ctrl", "alt", "win"} & set(combo.split("+"))
+                                             or re.fullmatch(r"f\d+|pause|scrolllock", combo)):
+            self.toast(f"«{name}» funciona en todas partes: usa Ctrl, Alt o Win con la tecla "
+                       "(si no, esa tecla dejaría de escribir en las demás aplicaciones)", 7)
+            return
+        self.cfg.keys = assign(self.cfg.keys, action, combo)
+        self.cfg.save()
+        self.inputs.set_keys(self.cfg.keys)
+        self.toast(f"{name}: {win32.combo_label(combo)}")
+
     # ---------- entrada ----------
 
     def handle_inputs(self) -> None:
         for ev in self.inputs.drain():
             if ev.kind == "fret":
                 self.held[ev.value] = ev.down
-            if ev.kind == "control" and ev.value in ("quit", "toggle"):
+            if ev.kind == "error":
+                self.toast(str(ev.value), 6)
+            elif ev.kind == "captured":
+                self.key_captured(str(ev.value))
+            elif self.capturing:  # esperando una tecla nueva: rojo o − (guitarra) cancelan
+                if (ev.kind == "fret" and ev.down and ev.value == 1) or (ev.kind == "control" and ev.value == "select"):
+                    self.inputs.cancel_capture()
+                    self.capturing = None
+            elif ev.kind == "control" and ev.value in ("quit", "toggle"):
                 QGuiApplication.quit() if ev.value == "quit" else self.toggle_visible()
             elif self.calib:
                 self.calib_input(ev)
@@ -922,6 +987,51 @@ class Bridge(QObject):
         return self.session.frame() if self.session else {}
 
 
+def tray_icon() -> QIcon:
+    """La autopista en pequeño: cinco carriles de colores que se juntan hacia arriba, sobre fondo oscuro."""
+    pix = QPixmap(64, 64)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor("#151527"))
+    p.drawRoundedRect(2, 2, 60, 60, 14, 14)
+    colors = ["#2ecc40", "#ff4136", "#ffdc00", "#1e90ff", "#ff851b"]
+    for i, c in enumerate(colors):  # abajo de 8 a 56, arriba de 22 a 42
+        x0, x1 = 8 + i * 9.6, 22 + i * 4
+        p.setBrush(QColor(c))
+        p.drawPolygon(QPolygonF([QPointF(x0 + 1, 54), QPointF(x0 + 8.6, 54), QPointF(x1 + 3.5, 10), QPointF(x1 + 0.5, 10)]))
+    p.setBrush(QColor("white"))
+    p.drawRect(8, 44, 48, 3)  # la línea de golpeo
+    p.end()
+    return QIcon(pix)
+
+
+def make_tray(app: QApplication, session: Session) -> QSystemTrayIcon | None:
+    """Icono junto al reloj: un clic muestra u oculta el juego; con el derecho, el menú (y Salir)."""
+    if not QSystemTrayIcon.isSystemTrayAvailable():
+        return None
+    tray = QSystemTrayIcon(tray_icon(), app)
+    menu = QMenu()
+    toggle = menu.addAction("Mostrar / ocultar", session.toggle_visible)
+    menu.addSeparator()
+    menu.addAction("Salir", app.quit)
+
+    def refresh() -> None:  # el atajo (se puede cambiar) y lo que suena, al abrir el menú o pasar por encima
+        key = win32.combo_label(keymap(session.cfg.keys)["toggle"])
+        toggle.setText(f"{'Ocultar' if session.view.isVisible() else 'Mostrar'} ({key})")
+        song = f"AIMP: {session.aimp_title}" if session.follow else f"{session.chart.artist} – {session.chart.title}"
+        tray.setToolTip(f"Music Hero · {song}")
+    menu.aboutToShow.connect(refresh)
+    tray.setContextMenu(menu)
+    tray.activated.connect(lambda reason: session.toggle_visible()
+                           if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
+    refresh()
+    tray.show()
+    tray._menu = menu  # que no lo recoja el recolector
+    return tray
+
+
 def place_view(view: QQuickView, cfg: Config) -> None:
     geo = QGuiApplication.primaryScreen().availableGeometry()
     w = min(geo.width(), cfg.highway_width + SIDE_MARGIN)
@@ -992,11 +1102,12 @@ def main() -> int:
     fmt = QSurfaceFormat.defaultFormat()
     fmt.setAlphaBufferSize(8)
     QSurfaceFormat.setDefaultFormat(fmt)
-    app = QGuiApplication(sys.argv)
+    app = QApplication(sys.argv)  # con widgets por el icono junto al reloj y su menú
+    app.setQuitOnLastWindowClosed(False)  # oculto sigue vivo: se sale desde el icono o con el atajo
     bridge = Bridge()
     view = make_view(cfg, bridge)
 
-    inputs = Inputs()
+    inputs = Inputs(cfg.keys)
     inputs.start()
     inputs.set_game_keys(True)
     for e in inputs.errors:
@@ -1004,6 +1115,7 @@ def main() -> int:
     aimp = Aimp()
     session = bridge.session = Session(chart, cfg, args.difficulty, inputs, view, records, aimp)
     session.set_autoplay(args.autoplay)
+    session.tray = make_tray(app, session)
     if not args.song and not (aimp.connected() and aimp.state() == PLAYING and session.follow_aimp()):
         session.open_selector()  # si suena AIMP, se le sigue; si no, a elegir canción
     if args.hidden:
@@ -1030,8 +1142,9 @@ def main() -> int:
         view.show()
         win32.make_click_through(int(view.winId()))
     playing = f"AIMP: {session.aimp_title}" if session.follow else f"{session.chart.artist} - {session.chart.title}"
-    print(f"{playing} ({DIFF_NAMES[session.difficulty]}). "
-          "+ / Espacio: menú, − / Tab: dificultad, Ctrl+Alt+H muestra/oculta, Ctrl+Alt+Q sale.")
+    keys = {a: win32.combo_label(k) for a, k in keymap(cfg.keys).items()}
+    print(f"{playing} ({DIFF_NAMES[session.difficulty]}). + / {keys['pause']}: menú, − / {keys['difficulty']}: "
+          f"dificultad, {keys['toggle']} muestra/oculta, {keys['quit']} sale (o el icono junto al reloj).")
     try:
         return app.exec()
     finally:

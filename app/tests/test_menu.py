@@ -63,3 +63,17 @@ def test_skip_to_no_cuenta_las_notas_pasadas():
     g.fret(2, True, 3000)
     g.strum(3000)
     assert g.notes[2].state == HIT and g.stats.accuracy == 1.0
+
+
+def test_teclas_se_intercambian():
+    from app.inputs import DEFAULT_KEYS, assign, keymap
+
+    keys = assign({}, "fret0", "j")
+    assert keys == {"fret0": "j"} and keymap(keys)["fret1"] == "s"
+    keys = assign(keys, "fret1", "j")  # la tenía el verde: se cambian
+    assert keymap(keys)["fret1"] == "j" and keymap(keys)["fret0"] == "s"
+    keys = assign(keys, "fret0", "a")
+    keys = assign(keys, "fret1", "s")
+    assert keys == {}  # todo como al principio: no se guarda nada
+    assert keymap({"nada": "x", "toggle": "ctrl+alt+m"})["toggle"] == "ctrl+alt+m" and "nada" not in keymap({"nada": "x"})
+    assert set(DEFAULT_KEYS) >= {"toggle", "quit", "fret0", "strum_up", "pause"}
