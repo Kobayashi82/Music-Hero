@@ -28,7 +28,9 @@ $GEN -m generator.learn.data out/encore out/dataset/feat5_library --guitar --dem
 
 say "entrenar" "train"
 $GEN -m generator.learn.train out/dataset/feat5 --guitar --frets --steps 25000 --eval-every 2500 \
-    --out models/onset_v5.pt > "${LOG}_train.log" 2>&1
+    --out models/onset_v5.pt > "${LOG}_train.log" 2>&1 \
+    || say "entrenar salió con código $? (el modelo guardado sirve; se examina igual)" \
+           "train exited with code $? (the saved model is fine; examining it anyway)"
 
 say "examen v5 / v4" "exam v5 / v4"
 $GEN tools/eval_model.py models/onset_v5.pt out/dataset/feat5_library > "${LOG}_eval_v5.log" 2>&1

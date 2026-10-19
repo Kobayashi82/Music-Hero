@@ -27,6 +27,24 @@ MIN_NPS = {"expert": 0.8, "hard": 0.6, "medium": 0.4, "easy": 0.3}
 # apenas cambia y en Medio y Fácil empeora (repite botón de más).
 VITERBI = {"expert": (1.0, 0.6)}
 LOWER_THRESHOLDS = (0.5, 0.4, 0.3, 0.2, 0.1, 0.05)
+# Modelos con guitarra (v5+): si la guitarra de Demucs casi no suena (canción sin guitarra), el modelo deja
+# la chart vacía; entonces se le da guitarra + piano + other, lo melódico que seguiría un charter humano.
+# Dale Duro: guitarra -53 dB, other -26 dB -> 1 nota en Experto con la guitarra, 202 con la suma.
+QUIET_GUITAR_DB = 12.0
+LEAD_STEMS = ("piano", "other")
+
+
+def rms_db(y: np.ndarray) -> float:
+    return float(20 * np.log10(np.sqrt(np.mean(np.square(y, dtype=np.float64))) + 1e-9))
+
+
+def guitar_input(guitar: np.ndarray, others: list[np.ndarray]) -> np.ndarray:
+    """La pista de guitarra o, si suena más de QUIET_GUITAR_DB por debajo de la más fuerte de las otras
+    melódicas, la suma de todas."""
+    if not others or rms_db(guitar) >= max(rms_db(o) for o in others) - QUIET_GUITAR_DB:
+        return guitar
+    n = max(len(guitar), *(len(o) for o in others))
+    return sum(np.pad(y, (0, n - len(y))) for y in [guitar, *others])
 
 
 def onsets_with_min(prob: np.ndarray, threshold: float, min_count: int) -> tuple[np.ndarray, float]:
@@ -70,7 +88,9 @@ def predict(audio: Path, model_path: Path, device: str = "cuda", style: float = 
     if model.guitar:
         if guitar is None:
             raise ValueError(t("{name} necesita la pista de guitarra (stems/guitar.flac)", name=model_path.name))
-        g = load_mono(guitar, SR) * scale  # con la escala de la mezcla, como al entrenar
+        g = guitar_input(load_mono(guitar, SR),
+                         [load_mono(p, SR) for p in (guitar.with_stem(s) for s in LEAD_STEMS) if p.exists()])
+        g = g * scale  # con la escala de la mezcla, como al entrenar
     feats = features(y * scale, device, g)
     probs = predict_song(model, feats, device, style)
     out = {}

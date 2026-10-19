@@ -172,9 +172,9 @@ Estado (18-10-2026): ✅ terminada con AIMP; el usuario lo ha probado (atajo a m
 - [x] Banco de pruebas: las 92 charts humanas de la biblioteca del usuario, fuera del entrenamiento (out/dataset/feat_library): `tools/eval_model.py` (F1 de inicios ±50 ms por dificultad, Harmonix y comunidad aparte), `tools/eval_frets.py` y `tools/eval_vs_human.py` (botones: exactos, dirección sube/baja, acordes).
 - [x] Ajustar con esa métrica en vez de a ojo: cada modelo y cada cambio del mapeo se decide con el examen (v2 → v3 → v4, Viterbi solo en Experto...).
 - [ ] Editor para corregir notas a mano: descartado por ahora; la idea es que lo hagan los modelos solos (fase 7: para otros usuarios).
-- [x] Entrenar un modelo propio con charts humanas: OnsetNet v1–v4 (ritmo, dificultades y botones; v4 en models/best.pt). v5 (con la pista de guitarra y su CQT, para acertar más los botones) se entrena la noche del 18-10-2026 con `sh tools/night_v5.sh`.
+- [x] Entrenar un modelo propio con charts humanas: OnsetNet v1–v4 (ritmo, dificultades y botones; v4 en models/best.pt). v5 (con la pista de guitarra y su CQT, para acertar más los botones) se entrenó la noche del 18-10-2026 con `sh tools/night_v5.sh` (models/onset_v5.pt).
 
-Estado (18-10-2026): falta el resultado de v5 (examen frente a v4) y, si gana, regenerar la biblioteca con él. Después: Demucs para los paquetes sin pista de guitarra, charts de teclado y estilo Neversoft.
+Estado (19-10-2026): v5 no sustituye a v4. Con la guitarra real de los paquetes gana de largo (Harmonix Experto F1 0,88 frente a 0,76), pero con la de Demucs, que es la que hay al generar, empata en ritmo con Harmonix, pierde en comunidad (Fácil 0,50 frente a 0,58) y solo gana en botones (dirección +4-8 puntos): se entrenó con pistas reales y al generar recibe la de Demucs. Siguiente: re-preparar con la guitarra de Demucs para todos los paquetes (`learn.data --guitar --demucs`, también los que traen pista) y reentrenar; examen con `out/dataset/feat5_library_demucs`. Después: charts de teclado y estilo Neversoft.
 
 ### Fase 6 – Extras
 

@@ -13,8 +13,9 @@ Uso:
     uv run --project generator python -m generator.learn.data out/dataset/sng out/dataset/feat [--follow] [--shard 0/4]
     uv run --project generator python -m generator.learn.data out/dataset/sng out/dataset/feat5 --guitar [--shard 0/4]
 
---guitar usa la pista de guitarra del paquete (guitar*.ogg...); los que no la traen se saltan, salvo con
---demucs, que la separa con Demucs (htdemucs_6s, como al generar).
+--guitar usa la pista de guitarra del paquete (guitar*.ogg...); los que no la traen se saltan. Con --demucs
+la separa siempre Demucs (htdemucs_6s, como al generar), la traiga o no: v5 aprendió con las pistas reales y
+con la de Demucs rinde peor (examen del 19-10-2026).
 
 --shard k/n reparte el trabajo entre n procesos (cada uno hace los paquetes con md5 % n == k).
 """
@@ -135,7 +136,9 @@ def features(y: np.ndarray, device: str = "cuda", guitar: np.ndarray | None = No
         return np.concatenate([mel, beats], axis=1)
     g = np.pad(guitar, (0, max(0, len(y) - len(guitar))))[:len(y)]
     g_mel = (log_mel(g) - mean) / std  # con la escala de la mezcla: una guitarra callada se ve callada
-    return np.concatenate([mel, g_mel, guitar_cqt(g), beats], axis=1)
+    cqt = guitar_cqt(g)[:len(mel)]  # a veces sale un fotograma más que el mel
+    cqt = np.pad(cqt, ((0, len(mel) - len(cqt)), (0, 0)), mode="edge")
+    return np.concatenate([mel, g_mel, cqt, beats], axis=1)
 
 
 def guitar_cqt(g: np.ndarray) -> np.ndarray:
@@ -219,10 +222,10 @@ def prepare(sng: Path, out_dir: Path, device: str = "cuda", guitar: bool = False
     y, g = package_tracks(files)
     if y is None or len(y) < SR * 30:
         return None
-    if guitar and g is None:
-        if not demucs:
-            return None
+    if guitar and demucs:
         g = demucs_guitar(y, device)
+    elif guitar and g is None:
+        return None
     feats = features(y, device, g if guitar else None)
     lab = labels(diffs, len(feats))
     np.save(out_dir / f"{sng.stem}.feats.npy", feats.astype(np.float16))

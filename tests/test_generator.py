@@ -360,3 +360,26 @@ def test_min_density_lowers_threshold():
     assert len(on) == 8 and th == 0.2
     on, th = onsets_with_min(np.zeros(1000, np.float32), 0.7, 8)
     assert len(on) == 0  # nada que encontrar: no inventa notas
+
+
+def test_guitar_features_align_cqt_frames(monkeypatch):
+    """El CQT a veces sale con un fotograma más que el mel: se recorta (o se rellena) para poder unirlos."""
+    from generator.learn import data
+
+    monkeypatch.setattr(data, "log_mel", lambda y: np.zeros((100, data.N_MELS), np.float32))
+    monkeypatch.setattr(data, "beat_activations", lambda y, n, device="cuda": np.zeros((n, 2), np.float32))
+    for extra in (1, -1):
+        monkeypatch.setattr(data, "guitar_cqt", lambda g, e=extra: np.ones((100 + e, data.N_CQT), np.float32))
+        f = data.features(np.zeros(1000, np.float32), "cpu", guitar=np.zeros(1000, np.float32))
+        assert f.shape == (100, data.N_FEATS_GUITAR)
+
+
+def test_guitar_input_falls_back_to_lead_stems_when_guitar_is_quiet():
+    from generator.learn.infer import guitar_input
+
+    rng = np.random.default_rng(0)
+    loud, quiet = rng.normal(0, 0.1, 1000), rng.normal(0, 0.001, 1000)  # -20 dB y -60 dB
+    assert guitar_input(loud, [quiet]) is loud
+    assert guitar_input(loud, []) is loud
+    mixed = guitar_input(quiet, [loud[:900]])
+    assert len(mixed) == 1000 and np.allclose(mixed[:900], quiet[:900] + loud[:900])
