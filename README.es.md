@@ -57,11 +57,13 @@ Una vez instalado:
 | Teclado | Guitarra | Acción |
 | --- | --- | --- |
 | `A` `S` `D` `F` `G` | Trastes | Verde, rojo, amarillo, azul, naranja |
-| `↑` `↓` | Barra de strum | Rasguear (en los menús: moverse) |
+| `↑` `↓` · `→` `←` | Barra de strum | Rasguear (en los menús: moverse) |
 | `Espacio` · clic derecho en la autopista | `+` | Menú / pausa |
 | `Tab` | `−` | Cambiar de dificultad sin parar |
 | `E` | Levantar la guitarra | Star power |
 | `Retroceso` | | Reiniciar la canción |
+| `Inicio` / `Fin` | Cruceta ← / → del Wiimote | Retroceder / avanzar 5 s |
+| `Re Pág` / `Av Pág` | Cruceta ↑ / ↓ del Wiimote | Subir / bajar el volumen (siguiendo a AIMP, el de AIMP) |
 | `Ctrl+Alt+H` | `A` del Wiimote | Mostrar / ocultar (funciona en todas partes) |
 | `Ctrl+Alt+Q` | | Salir |
 | | `1` / `2` / `Home` del Wiimote | Canción siguiente / anterior / al azar |
@@ -109,11 +111,10 @@ Deja la app en `build/dist/Music Hero/` y el instalador en `build/installer/Musi
 | `shared/` | Esquemas JSON de `chart.json` y `lyrics.json` |
 | `packaging/` | PyInstaller e Inno Setup |
 | `tools/` | Diagnóstico, dataset de entrenamiento y exámenes de los modelos ([detalles](tools/README.es.md)) |
-| `ROADMAP.md` | Fases y estado |
 
 ## Estado
 
-Las fases 0 a 6 están terminadas: el juego, el generador de charts, la letra, la sincronía con AIMP, el star power y los récords. La fase 7, para que otros lo puedan instalar, está casi acabada. Falta probar el instalador en un Windows limpio, publicar el modelo y una versión para tarjetas gráficas que no sean NVIDIA (ONNX/DirectML). Todo el detalle en [ROADMAP.md](ROADMAP.md).
+Las fases 0 a 6 están terminadas: el juego, el generador de charts, la letra, la sincronía con AIMP, el star power y los récords. La fase 7, para que otros lo puedan instalar, está casi acabada. Falta probar el instalador en un Windows limpio, publicar el modelo y una versión para tarjetas gráficas que no sean NVIDIA (ONNX/DirectML).
 
 ## Agradecimientos
 

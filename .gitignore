@@ -14,3 +14,7 @@ library/
 *.flac
 *.ogg
 models/
+
+# Notas locales (no van al repositorio)
+CLAUDE.md
+ROADMAP.md

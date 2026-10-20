@@ -6,11 +6,11 @@ juego los pasa a ms de la canción con el reloj del reproductor (Player.position
 Teclado, con el juego activo (las teclas no llegan a la app que tenga el foco). Estas son las de por defecto
 (ACTIONS); se cambian en Ajustes → Teclas y se guardan en config.keys:
     A S D F G          trastes verde, rojo, amarillo, azul, naranja
-    flechas arriba/abajo, Intro   strum (en los menús: mover; Intro elige)
+    flechas arriba/abajo, Intro   strum (en los menús: mover; Intro elige); derecha/izquierda, también strum
     Espacio            menú (pausa)   Esc   volver (jugando: la pausa)   Retroceso   reiniciar la canción
     Tab                cambiar de dificultad sin parar la canción
     E                  activar el star power
-    flechas izquierda/derecha   retroceder / avanzar 5 s   Re Pág / Av Pág   subir / bajar el volumen
+    Inicio / Fin       retroceder / avanzar 5 s   Re Pág / Av Pág   subir / bajar el volumen
 En el buscador, letras, números y Espacio escriben y Retroceso borra (los trastes siguen en la guitarra).
 Siempre: Ctrl+Alt+H mostrar/ocultar (oculto = pausa y teclado libre), Ctrl+Alt+Q salir.
 Guitarra: + menú (pausa), − cambiar de dificultad, levantar el mástil activa el star power (acelerómetro del
@@ -46,14 +46,16 @@ ACTIONS = [
     ("fret4", N_("Traste naranja"), "g", ("fret", 4)),
     ("strum_up", N_("Strum arriba"), "up", ("strum", -1)),
     ("strum_down", N_("Strum abajo"), "down", ("strum", 1)),
+    ("strum_up2", N_("Strum arriba (otra tecla)"), "right", ("strum", -1)),
+    ("strum_down2", N_("Strum abajo (otra tecla)"), "left", ("strum", 1)),
     ("pause", N_("Menú (pausa)"), "space", ("control", "pause")),
     ("back", N_("Volver / pausa"), "esc", ("control", "back")),
     ("restart", N_("Reiniciar la canción"), "backspace", ("control", "restart")),
     ("difficulty", N_("Cambiar de dificultad"), "tab", ("control", "difficulty")),
     ("star", N_("Star power"), "e", ("control", "star")),
     ("enter", N_("Elegir"), "enter", ("control", "enter")),
-    ("seek_back", N_("Retroceder 5 s"), "left", ("control", "seek_back")),
-    ("seek_fwd", N_("Avanzar 5 s"), "right", ("control", "seek_fwd")),
+    ("seek_back", N_("Retroceder 5 s"), "home", ("control", "seek_back")),
+    ("seek_fwd", N_("Avanzar 5 s"), "end", ("control", "seek_fwd")),
     ("vol_up", N_("Subir el volumen"), "pageup", ("control", "vol_up")),
     ("vol_down", N_("Bajar el volumen"), "pagedown", ("control", "vol_down")),
 ]

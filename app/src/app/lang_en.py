@@ -56,6 +56,8 @@ EN: dict[str, str] = {
     "Traste naranja": "Orange fret",
     "Strum arriba": "Strum up",
     "Strum abajo": "Strum down",
+    "Strum arriba (otra tecla)": "Strum up (second key)",
+    "Strum abajo (otra tecla)": "Strum down (second key)",
     "Menú (pausa)": "Menu (pause)",
     "Volver / pausa": "Back / pause",
     "Reiniciar la canción": "Restart the song",

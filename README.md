@@ -57,11 +57,13 @@ Once installed:
 | Keyboard | Guitar | Action |
 | --- | --- | --- |
 | `A` `S` `D` `F` `G` | Frets | Green, red, yellow, blue, orange |
-| `↑` `↓` | Strum bar | Strum (in menus: move) |
+| `↑` `↓` · `→` `←` | Strum bar | Strum (in menus: move) |
 | `Space` · right-click on the highway | `+` | Menu / pause |
 | `Tab` | `−` | Change difficulty without stopping |
 | `E` | Tilt the guitar up | Star power |
 | `Backspace` | | Restart the song |
+| `Home` / `End` | Wiimote D-pad ← / → | Back / forward 5 s |
+| `Page Up` / `Page Down` | Wiimote D-pad ↑ / ↓ | Volume up / down (AIMP's own when following it) |
 | `Ctrl+Alt+H` | Wiimote `A` | Show / hide (works everywhere) |
 | `Ctrl+Alt+Q` | | Quit |
 | | Wiimote `1` / `2` / `Home` | Next / previous / random song |
@@ -109,11 +111,10 @@ This produces the app folder in `build/dist/Music Hero/` and the installer `buil
 | `shared/` | JSON schemas of `chart.json` and `lyrics.json` |
 | `packaging/` | PyInstaller and Inno Setup |
 | `tools/` | Diagnostics, training dataset and model evaluation ([details](tools/README.md)) |
-| `ROADMAP.md` | Phases and status (in Spanish) |
 
 ## Status
 
-Phases 0–6 are done: the game, the chart generator, lyrics, AIMP sync, star power and high scores. Phase 7, so that other people can install it, is almost finished. What's left: testing the installer on a clean Windows, publishing the model and a version for GPUs that aren't NVIDIA (ONNX/DirectML). Details in [ROADMAP.md](ROADMAP.md).
+Phases 0–6 are done: the game, the chart generator, lyrics, AIMP sync, star power and high scores. Phase 7, so that other people can install it, is almost finished. What's left: testing the installer on a clean Windows, publishing the model and a version for GPUs that aren't NVIDIA (ONNX/DirectML).
 
 ## Acknowledgements
 
