@@ -15,6 +15,7 @@ ENGINE_DIR/install.log.
 
 from __future__ import annotations
 
+import filecmp
 import json
 import os
 import re
@@ -55,6 +56,19 @@ def driver_version() -> int | None:
         return None
 
 
+def update_model(engine_dir: Path = ENGINE_DIR, bundled: Path | None = None) -> Path:
+    """Deja en el motor el OnsetNet que lleva la app (models/best.pt), si falta o es otro: al reinstalar la app con
+    un modelo nuevo, el motor ya instalado no se queda con el de antes. Quita el onsetnet.pt de las versiones viejas
+    (con otro nombre, la versión de las charts no casaba con las hechas en desarrollo y se rehacían)."""
+    bundled = bundled or (BUNDLE / "models" / "best.pt" if FROZEN else REPO / "models" / "best.pt")
+    target = engine_dir / "models" / "best.pt"
+    if bundled.exists() and not (target.exists() and filecmp.cmp(bundled, target, shallow=False)):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(bundled, target)
+    (engine_dir / "models" / "onsetnet.pt").unlink(missing_ok=True)
+    return target
+
+
 def cpu_pyproject(text: str) -> str:
     """El pyproject del generador sin la GPU: torch de PyPI (sin el índice de CUDA) y onnxruntime normal."""
     text = re.sub(r"\[tool\.uv\.sources\][^\[]*", "", text)
@@ -70,7 +84,7 @@ class EngineInstaller:
         self.engine_dir = engine_dir
         self.source = source or (BUNDLE / "engine_src" if FROZEN else REPO / "generator")
         self.uv = uv or (str(BUNDLE / "uv.exe") if FROZEN else shutil.which("uv") or "uv")
-        self.onsetnet = onsetnet or (BUNDLE / "models" / "onsetnet.pt" if FROZEN else REPO / "models" / "best.pt")
+        self.onsetnet = onsetnet or (BUNDLE / "models" / "best.pt" if FROZEN else REPO / "models" / "best.pt")
         self.state = "idle"  # idle | running | done | error
         self.step = ""
         self.done = 0.0  # 0..1 (aproximado: uv no dice cuánto le falta)
@@ -154,10 +168,7 @@ class EngineInstaller:
         if failed:
             raise RuntimeError(failed[-1])
 
-        target = self.engine_dir / "models" / "onsetnet.pt"
-        if self.onsetnet.exists():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(self.onsetnet, target)
+        target = update_model(self.engine_dir, self.onsetnet)
         (self.engine_dir / "installed.json").write_text(json.dumps({
             "variant": self.variant, "date": time.strftime("%Y-%m-%d %H:%M:%S"),
             "model": target.name if target.exists() else None}, indent=1), encoding="utf-8")

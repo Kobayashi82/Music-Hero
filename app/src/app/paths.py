@@ -21,4 +21,4 @@ ENGINE_DIR = HOME / "engine"  # el motor instalado (Python, torch, modelos); en 
 QUEUE_FILE = DATA / "engine_queue.json"
 ENGINE_LOG = DATA / "engine.log"
 APP_LOG = DATA / "app.log"  # instalada no hay consola: lo que imprime la app va aquí
-MODEL = ENGINE_DIR / "models" / "onsetnet.pt" if FROZEN else REPO / "models" / "best.pt"
+MODEL = ENGINE_DIR / "models" / "best.pt" if FROZEN else REPO / "models" / "best.pt"

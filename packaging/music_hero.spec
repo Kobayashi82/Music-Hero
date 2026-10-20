@@ -11,7 +11,7 @@ a = Analysis(  # noqa: F821
     datas=[
         (str(REPO / "app" / "src" / "app" / "qml"), "app/qml"),
         (str(STAGE / "engine_src"), "engine_src"),
-        (str(STAGE / "onsetnet.pt"), "models"),
+        (str(STAGE / "best.pt"), "models"),
         (str(STAGE / "uv.exe"), "."),
     ],
     excludes=["tkinter", "unittest", "pydoc", "torch", "winrt", "IPython", "matplotlib"],

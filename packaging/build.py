@@ -3,7 +3,8 @@
     uv run --project app --with pyinstaller python packaging/build.py [--no-installer]
 
 Deja en build/stage lo que va dentro además del código de la app: el código del motor (generator: pyproject,
-uv.lock y src, sin cachés), OnsetNet (models/best.pt -> onsetnet.pt), uv.exe y el icono. La app queda en
+uv.lock y src, sin cachés), OnsetNet (models/best.pt, con el mismo nombre: así las charts hechas en desarrollo
+valen tal cual en la instalada), uv.exe y el icono. La app queda en
 build/dist/Music Hero/ y el instalador en build/installer/.
 """
 
@@ -32,7 +33,7 @@ def stage() -> None:
         shutil.copy2(REPO / "generator" / f, engine / f)
     shutil.copytree(REPO / "generator" / "src", engine / "src",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.egg-info"))
-    shutil.copy2(REPO / "models" / "best.pt", STAGE / "onsetnet.pt")
+    shutil.copy2(REPO / "models" / "best.pt", STAGE / "best.pt")
     uv = shutil.which("uv")
     if uv is None:
         sys.exit("falta uv.exe (va dentro de la app para instalar el motor)")

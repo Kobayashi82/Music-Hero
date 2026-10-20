@@ -40,10 +40,11 @@ def engine_command() -> tuple[list[str], dict[str, str], Path] | None:
         args.append("--keep-stems")
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}  # el del juego no es el del generador
     if FROZEN:
-        from .installer import installed
+        from .installer import installed, update_model
 
         if not installed():  # se instala la primera vez que hace falta (installer.py)
             return None
+        update_model()  # el modelo de esta versión de la app
         py = ENGINE_DIR / ".venv" / "Scripts" / "python.exe"
         return [str(py), "-m", "generator.engine", *args], env | model_env(ENGINE_DIR), ENGINE_DIR
     uv = shutil.which("uv")
