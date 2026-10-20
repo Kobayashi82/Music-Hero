@@ -15,6 +15,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -105,7 +106,7 @@ def main() -> int:
     if iscc is None:
         print("Inno Setup no está instalado: falta el instalador (winget install JRSoftware.InnoSetup)")
         return 0
-    version = "0.1.0"
+    version = tomllib.loads((REPO / "app" / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     subprocess.run([str(iscc), f"/DAppVersion={version}", str(REPO / "packaging" / "music_hero.iss")], check=True)
     out = BUILD / "installer" / f"MusicHero-Setup-{version}.exe"
     print(f"instalador: {out} ({out.stat().st_size / 2**20:.0f} MB)")

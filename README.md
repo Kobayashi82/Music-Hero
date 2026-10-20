@@ -43,7 +43,7 @@ With an NVIDIA graphics card a song takes about a minute. Without one it runs on
 
 ## Install
 
-There's no published release yet. To build the installer yourself, see [Build](#build).
+Download `MusicHero-Setup-1.0.0.exe` from the [latest release](https://github.com/Kobayashi82/Music-Hero/releases/latest) and run it (no administrator rights needed). To build it yourself, see [Build](#build).
 
 Once installed:
 
@@ -91,7 +91,7 @@ uv run --project app --with pytest pytest app/tests
 uv run --project generator --with pytest --with jsonschema pytest tests
 ```
 
-> **Note:** the trained OnsetNet model (`models/best.pt`) isn't published yet; it will be on Hugging Face. Without it, `generate` falls back to rules and makes the Expert difficulty only.
+> **Note:** the trained OnsetNet model ships inside the installer, but isn't published on its own yet (it will be on Hugging Face), so running from source needs `models/best.pt`. Without it, `generate` falls back to rules and makes the Expert difficulty only.
 
 ## Build
 
@@ -127,4 +127,4 @@ Phases 0–6 are done: the game, the chart generator, lyrics, AIMP sync, star po
 
 ## License
 
-The code is under the [MIT License](LICENSE). The trained OnsetNet model will be published separately under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (no commercial use), because it was trained on community charts.
+The code is under the [MIT License](LICENSE). The trained OnsetNet model (inside the installer) is under [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) (no commercial use), because it was trained on community charts.
