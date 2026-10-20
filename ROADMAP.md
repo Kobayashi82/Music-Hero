@@ -172,9 +172,19 @@ Estado (18-10-2026): ✅ terminada con AIMP; el usuario lo ha probado (atajo a m
 - [x] Banco de pruebas: las 92 charts humanas de la biblioteca del usuario, fuera del entrenamiento (out/dataset/feat_library): `tools/eval_model.py` (F1 de inicios ±50 ms por dificultad, Harmonix y comunidad aparte), `tools/eval_frets.py` y `tools/eval_vs_human.py` (botones: exactos, dirección sube/baja, acordes).
 - [x] Ajustar con esa métrica en vez de a ojo: cada modelo y cada cambio del mapeo se decide con el examen (v2 → v3 → v4, Viterbi solo en Experto...).
 - [ ] Editor para corregir notas a mano: descartado por ahora; la idea es que lo hagan los modelos solos (fase 7: para otros usuarios).
-- [x] Entrenar un modelo propio con charts humanas: OnsetNet v1–v4 (ritmo, dificultades y botones; v4 en models/best.pt). v5 (con la pista de guitarra y su CQT, para acertar más los botones) se entrenó la noche del 18-10-2026 con `sh tools/night_v5.sh` (models/onset_v5.pt).
+- [x] Entrenar un modelo propio con charts humanas: OnsetNet v1–v5d (ritmo, dificultades y botones; v5d en models/best.pt desde el 20-10-2026). v5 (con la pista de guitarra y su CQT, para acertar más los botones) se entrenó la noche del 18-10-2026 con `sh tools/night_v5.sh` (models/onset_v5.pt); v5d es v5 afinado con la guitarra de Demucs (`sh tools/night_v5d.sh`, models/onset_v5d.pt).
 
-Estado (19-10-2026): v5 no sustituye a v4. Con la guitarra real de los paquetes gana de largo (Harmonix Experto F1 0,88 frente a 0,76), pero con la de Demucs, que es la que hay al generar, empata en ritmo con Harmonix, pierde en comunidad (Fácil 0,50 frente a 0,58) y solo gana en botones (dirección +4-8 puntos): se entrenó con pistas reales y al generar recibe la de Demucs. Siguiente: `sh tools/night_v5d.sh` afina v5 con la guitarra de Demucs (separada en estéreo, como al generar) de los mismos ~4.800 paquetes y lo examina frente a v4; si gana, ampliar a los ~11.600 sin pista de guitarra. Después: charts de teclado y estilo Neversoft.
+Estado (19-10-2026): v5 no sustituye a v4. Con la guitarra real de los paquetes gana de largo (Harmonix Experto F1 0,88 frente a 0,76), pero con la de Demucs, que es la que hay al generar, empata en ritmo con Harmonix, pierde en comunidad (Fácil 0,50 frente a 0,58) y solo gana en botones (dirección +4-8 puntos): se entrenó con pistas reales y al generar recibe la de Demucs. Siguiente: afinar v5 con la guitarra de Demucs (`sh tools/night_v5d.sh`).
+
+Estado (20-10-2026): v5d sustituye a v4 en models/best.pt. Es v5 afinado 10000 pasos con la guitarra de Demucs (en estéreo, como al generar) de los 6.288 paquetes que traen pista de guitarra. Examen sobre las 92 charts humanas de la biblioteca, con la guitarra de Demucs: F1 de ritmo Experto / Difícil / Medio / Fácil y dirección de botones en Experto.
+
+| | Harmonix | comunidad | dirección (Harmonix / comunidad) |
+|---|---|---|---|
+| v4 | 0,761 / 0,731 / 0,666 / 0,629 | 0,732 / 0,705 / 0,618 / 0,584 | 46 % / 44 % |
+| v5 | 0,779 / 0,761 / 0,717 / 0,682 | 0,724 / 0,693 / 0,626 / 0,526 | 57 % / 50 % |
+| v5d | 0,797 / 0,768 / 0,723 / 0,698 | 0,742 / 0,710 / 0,630 / 0,538 | 56 % / 51 % |
+
+Gana en todo salvo en Fácil de comunidad, donde se deja notas (recall 0,44 con umbral 0,7); el usuario no juega en Fácil. Carpeta de música regenerada con v5d. Siguiente: ampliar a los ~11.600 paquetes sin pista de guitarra (`--demucs` sin `--with-track`) y quizá bajar el umbral de Fácil. Después: charts de teclado y estilo Neversoft.
 
 ### Fase 6 – Extras
 
