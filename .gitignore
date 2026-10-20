@@ -18,3 +18,4 @@ models/
 # Notas locales (no van al repositorio)
 CLAUDE.md
 ROADMAP.md
+data/encore_library.json
