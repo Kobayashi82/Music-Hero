@@ -63,6 +63,8 @@ class EngineState:
     done: float = 0.0  # de la actual, 0..1
     step: str = ""
     error: str = ""  # el último problema del propio motor (no el de una canción)
+    finished: int = 0  # hechas desde que se abrió el juego
+    eta_s: float | None = None  # lo que falta para acabar la cola (None: aún no se sabe)
 
 
 class EngineClient:
@@ -80,6 +82,9 @@ class EngineClient:
         self._restarts = 0
         self._restart_at: float | None = None
         self._idle_since: float | None = None
+        self._active_s = 0.0  # lo que lleva la canción actual trabajando (sin las pausas)
+        self._tick: float | None = None
+        self._durations: list[float] = []  # lo que tardaron las últimas (para la estimación)
 
     # ---------- órdenes ----------
 
@@ -167,6 +172,10 @@ class EngineClient:
         """Lo que ha dicho el motor desde la última vez (start, progress, done, error...), con el estado al día;
         también lo vuelve a lanzar si se cayó, y lo cierra si lleva rato sin trabajo."""
         now = time.monotonic() if now is None else now
+        s = self.state
+        if self._tick is not None and s.current and not s.paused:
+            self._active_s += now - self._tick
+        self._tick = now
         out = []
         while True:
             try:
@@ -175,6 +184,7 @@ class EngineClient:
                 break
             self._apply(ev, now)
             out.append(ev)
+        s.eta_s = self._eta()
         if self._restart_at is not None and now >= self._restart_at:
             self.start()
         if self._idle_since is not None and now - self._idle_since > IDLE_QUIT_S and self._proc is not None:
@@ -182,6 +192,19 @@ class EngineClient:
         return out
 
     # ---------- interno ----------
+
+    def _eta(self) -> float | None:
+        """Lo que falta: la actual por su avance y las de la cola a lo que tardan de media (la mediana de las
+        últimas; sin ninguna hecha aún, lo que va a tardar la actual según su avance)."""
+        s = self.state
+        if not s.pending:
+            return None
+        guess = self._active_s / s.done if s.current and s.done >= 0.15 else None
+        per = sorted(self._durations)[len(self._durations) // 2] if self._durations else guess
+        if per is None:
+            return None
+        current = (guess if guess is not None else per) * (1 - s.done) if s.current else 0.0
+        return current + per * (s.pending - (1 if s.current else 0))
 
     def _send(self, cmd: dict, start: bool = True) -> None:
         if self._proc is None and not (start and self.start()):
@@ -211,9 +234,14 @@ class EngineClient:
             s.pending, s.failed, s.paused, s.current = ev["pending"], ev["failed"], ev["paused"], ev["current"]
         elif kind == "start":
             s.current, s.done, s.step = ev["file"], 0.0, ""
+            self._active_s = 0.0
         elif kind == "progress":
             s.done, s.step = ev["done"], ev["step"]
         elif kind in ("done", "error") and ev.get("file") == s.current:
+            if kind == "done":
+                s.finished += 1
+                if not ev.get("skipped") and self._active_s > 5:  # las ya hechas (saltadas) no dicen nada
+                    self._durations = (self._durations + [self._active_s])[-20:]
             s.current, s.done, s.step = None, 0.0, ""
         elif kind == "paused":
             s.paused = True

@@ -75,3 +75,34 @@ def test_salto_desde_aimp(monkeypatch):
     assert wait_for(lambda: p._seek is not None or p.clock.seeked_to is not None)
     assert p.take_seek() == 120000 and p.take_seek() is None
     p.close()
+
+
+def test_seguir_tras_una_pausa_no_es_un_salto(monkeypatch):
+    """Los cambios de antes de la pausa no valen al seguir: adelantarían la estimación lo que durase la pausa."""
+    from app.aimp import PositionClock
+
+    now = [0.0]
+    monkeypatch.setattr(PositionClock, "now", staticmethod(lambda: now[0]))
+    aimp = FakeAimp()
+    clock = PositionClock(aimp)
+    for i in range(10):  # sonando: 30 ms cada 30 ms
+        now[0], aimp.pos = i * 0.03, 50000 + i * 30
+        clock.update()
+    aimp._state = PAUSED
+    for i in range(10, 200):  # 5 s en pausa
+        now[0] = i * 0.03
+        clock.update()
+    aimp._state = PLAYING
+    now[0], aimp.pos = 6.03, 50300
+    clock.update()
+    assert clock.seeked_to is None and abs(clock.estimate(6.03) - 50300) < 1
+
+
+def test_el_retardo_nuevo_entra_poco_a_poco(monkeypatch):
+    p = AimpPlayer(FakeAimp(), Track("x.mp3", "x", "", "", 200000), offset_ms=100.0)
+    t0 = time.perf_counter()
+    p.offset_ms = 120.0  # lo medido con el loopback
+    assert p.offset_ms == 120.0
+    assert 99 < p._offset_at(t0) < 101 and 109 < p._offset_at(t0 + p.OFFSET_GLIDE_S / 2) < 111
+    assert p._offset_at(t0 + p.OFFSET_GLIDE_S + 0.1) == 120.0
+    p.close()

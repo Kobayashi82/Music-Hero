@@ -38,7 +38,7 @@ REMOTE_MAP_SIZE = 2048
 WM_AIMP_COMMAND = 0x0400 + 0x75
 WM_AIMP_PROPERTY = 0x0400 + 0x77
 PROP_GET, PROP_SET = 0, 1
-PROP_VERSION, PROP_POSITION, PROP_DURATION, PROP_STATE = 0x10, 0x20, 0x30, 0x40
+PROP_VERSION, PROP_POSITION, PROP_DURATION, PROP_STATE, PROP_VOLUME = 0x10, 0x20, 0x30, 0x40, 0x50
 CMD_PLAY, CMD_PAUSE, CMD_NEXT, CMD_PREV = 13, 15, 17, 18
 STOPPED, PAUSED, PLAYING = 0, 1, 2
 FILE_MAP_READ = 0x0004
@@ -104,6 +104,13 @@ class Aimp:
     def duration(self) -> int:
         return self._prop(PROP_DURATION)
 
+    def volume(self) -> int:
+        """0..100"""
+        return self._prop(PROP_VOLUME)
+
+    def set_volume(self, v: int) -> None:
+        self._prop(PROP_VOLUME, max(0, min(100, int(v))))
+
     def command(self, cmd: int) -> None:
         if self.hwnd:
             user32.SendMessageW(self.hwnd, WM_AIMP_COMMAND, cmd, 0)
@@ -165,6 +172,9 @@ class PositionClock:
     valor nuevo es lo más fresco que hay: offset = posición - reloj en ese
     instante. Se toma el mayor offset de los últimos segundos (el cambio con
     menos retraso) y la posición estimada es reloj + offset.
+
+    En pausa se olvidan los cambios: al seguir, los de antes de la pausa adelantarían la estimación todo lo que
+    durase la pausa (y se tomaría por un salto).
     """
 
     WINDOW_S = 3.0
@@ -186,6 +196,8 @@ class PositionClock:
         t = self.now()
         pos = self.aimp.position()
         self.playing = self.aimp.state() == PLAYING
+        if not self.playing:
+            self.changes.clear()
         if pos == self.last_pos:
             return
         if self.changes and self.playing:
@@ -213,7 +225,8 @@ class AimpPlayer:
     """El reloj del juego cuando suena AIMP: la interfaz de player.Player (position_ms, playing, play, pause,
     seek, finished...), con la posición de AIMP interpolada y leída en su hilo cada pocos ms.
 
-    offset_ms: lo que tarda en oírse lo que AIMP dice que está sonando (su búfer de salida, el driver...).
+    offset_ms: lo que tarda en oírse lo que AIMP dice que está sonando (su búfer de salida, el driver...). Si
+    cambia (lo medido con el loopback, o a mano), se pasa al nuevo poco a poco (OFFSET_GLIDE_S): sin saltos.
 
     Pausar y seguir no se mandan a ciegas: en AIMP, PAUSE alterna y tarda ~0,6 s en cambiar el estado (funde
     el sonido), y PLAY con la canción sonando la empieza de nuevo. Se guarda el estado querido y el hilo manda
@@ -221,6 +234,7 @@ class AimpPlayer:
     """
 
     CMD_WAIT_S = 1.0  # lo que se espera a que una orden se note antes de repetirla
+    OFFSET_GLIDE_S = 2.0  # un cambio de offset_ms se reparte en este tiempo (20 ms en 2 s: 1 % de velocidad)
 
     POLL_S = 0.004
     END_MS = 400  # a menos de esto del final, la canción se da por acabada
@@ -228,8 +242,7 @@ class AimpPlayer:
 
     def __init__(self, aimp: Aimp, track: Track, offset_ms: float = 0.0):
         self.aimp, self.track = aimp, track
-        self.offset_ms = offset_ms
-        self.volume = 1.0  # el volumen es cosa de AIMP
+        self._glide = (offset_ms, offset_ms, 0.0)  # offset_ms: (de, a, desde cuándo)
         self.duration_ms = track.duration_ms
         self.clock = PositionClock(aimp)
         self._lock = threading.Lock()
@@ -287,6 +300,29 @@ class AimpPlayer:
     def playing(self) -> bool:
         return self.clock.playing and self._want != PAUSED  # pausado ya al pedirlo, aunque AIMP aún funda
 
+    @property
+    def offset_ms(self) -> float:
+        return self._glide[1]
+
+    @offset_ms.setter
+    def offset_ms(self, ms: float) -> None:
+        now = time.perf_counter()
+        self._glide = (self._offset_at(now), ms, now)
+
+    def _offset_at(self, at: float) -> float:
+        start, end, since = self._glide
+        k = (at - since) / self.OFFSET_GLIDE_S
+        return end if k >= 1 else start + (end - start) * max(0.0, k)
+
+    @property
+    def volume(self) -> float:
+        """0..1, el de AIMP."""
+        return self.aimp.volume() / 100
+
+    @volume.setter
+    def volume(self, v: float) -> None:
+        self.aimp.set_volume(round(v * 100))
+
     def seek(self, ms: float) -> None:
         self.aimp.seek(int(max(0, ms)))
 
@@ -307,5 +343,11 @@ class AimpPlayer:
     # ---------- reloj ----------
 
     def position_ms(self, at: float | None = None) -> float:
+        at = time.perf_counter() if at is None else at
         with self._lock:
-            return self.clock.estimate(at) - self.offset_ms
+            return self.clock.estimate(at) - self._offset_at(at)
+
+    def raw_ms(self, at: float | None = None) -> float:
+        """La posición tal como la da AIMP (sin offset_ms), interpolada."""
+        with self._lock:
+            return self.clock.estimate(at)

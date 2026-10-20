@@ -2,7 +2,8 @@
 
 Reglas (las de Clone Hero / YARG, simplificadas):
 - Una nota se toca con strum dentro de ±HIT_WINDOW_MS de su tiempo y los trastes correctos.
-- Nota suelta: cuenta el traste más alto pulsado (se pueden "anclar" los de abajo). Acorde: exactos.
+- Nota suelta: solo su traste; con anchor (Ajustes → Juego → Anclar trastes, como en Guitar Hero) cuenta el
+  traste más alto pulsado y se pueden "anclar" los de abajo. Acorde: exactos.
 - HOPO: basta con cambiar a los trastes correctos (sin strum) si la racha sigue viva.
 - Strum sin nota que tocar, o con trastes equivocados: "strum de más", rompe la racha. No cuenta el
   strum que llega justo después de tocar un HOPO sin strum (es costumbre rasguear igual).
@@ -76,20 +77,23 @@ class Stats:
         return self.hits / judged if judged else 1.0
 
 
-def frets_match(held: frozenset[int], frets: tuple[int, ...]) -> bool:
+def frets_match(held: frozenset[int], frets: tuple[int, ...], anchor: bool = True) -> bool:
+    """anchor: en las sueltas vale con que sea el más alto pulsado (los de abajo, anclados)."""
     if not held:
         return False
-    if len(frets) == 1:
+    if len(frets) == 1 and anchor:
         return max(held) == frets[0]
     return held == frozenset(frets)
 
 
 class Game:
     def __init__(self, notes: list[Note], window_ms: float = HIT_WINDOW_MS,
-                 phrases: list[tuple[int, int]] = (), beats: list[int] = ()):
-        """phrases: tramos (inicio, fin) de star power en ms; beats: tiempos de los pulsos (gastan la barra)."""
+                 phrases: list[tuple[int, int]] = (), beats: list[int] = (), anchor: bool = True):
+        """phrases: tramos (inicio, fin) de star power en ms; beats: tiempos de los pulsos (gastan la barra);
+        anchor: anclar trastes en las notas sueltas (frets_match)."""
         self.notes = [NoteState(n) for n in notes]
         self.window = window_ms
+        self.anchor = anchor
         self.stats = Stats()
         self.held: set[int] = set()
         self.next = 0  # primera nota sin juzgar
@@ -124,7 +128,7 @@ class Game:
     def strum(self, t: float) -> None:
         self.update(t)
         ns = self._candidate(t)
-        if ns is not None and frets_match(frozenset(self.held), ns.note.frets):
+        if ns is not None and frets_match(frozenset(self.held), ns.note.frets, self.anchor):
             self._hit(ns, t)
             self.stats.offsets.append(t - ns.note.time_ms)
             self._tap_ms = None
@@ -201,7 +205,7 @@ class Game:
             if ns.note.time_ms - self.window > t:
                 break
             if ns.state == PENDING and abs(ns.note.time_ms - t) <= self.window:
-                if frets_match(held, ns.note.frets):
+                if frets_match(held, ns.note.frets, self.anchor):
                     return ns
                 first = first or ns
         return first
@@ -210,7 +214,7 @@ class Game:
         if self.stats.streak == 0:
             return
         ns = self._candidate(t)
-        if ns is not None and ns.note.hopo and frets_match(frozenset(self.held), ns.note.frets):
+        if ns is not None and ns.note.hopo and frets_match(frozenset(self.held), ns.note.frets, self.anchor):
             self._hit(ns, t)
             self._tap_ms = t
 

@@ -32,6 +32,18 @@ def test_anclaje_en_notas_sueltas_y_acordes_exactos():
     assert g.notes[1].state == HIT
 
 
+def test_sin_anclaje_solo_vale_el_traste_de_la_nota():
+    g = Game([Note(1000, (2,)), Note(2000, (2,)), Note(2200, (1,), hopo=True)], anchor=False)
+    play(g, [0, 1, 2], 1000)  # verde, rojo y amarillo para una amarilla: no vale
+    assert g.notes[0].state != HIT and g.stats.overstrums == 1
+    play(g, [2], 2000)
+    assert g.notes[1].state == HIT
+    g.fret(1, True, 2190)  # hammer-on de amarillo a rojo: con el amarillo aún pulsado no cuenta...
+    assert g.notes[2].state != HIT
+    g.fret(2, False, 2200)  # ...y al soltarlo, sí
+    assert g.notes[2].state == HIT
+
+
 def test_traste_mas_alto_equivocado():
     g = Game([Note(1000, (1,))])
     play(g, [3], 1000)

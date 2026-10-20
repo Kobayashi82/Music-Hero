@@ -21,6 +21,7 @@ class Config:
     opacity: float = 0.95  # del fondo de la autopista
     volume: float = 1.0
     lyrics: bool = True  # letra bajo la autopista (sube la autopista para dejarle sitio)
+    anchoring: bool = False  # anclar trastes: en las notas sueltas vale el más alto pulsado (como Guitar Hero)
     hud_side: str = "right"  # marcador a la izquierda o a la derecha de la autopista
     aimp_offset_ms: float = 230.0  # lo que AIMP tarda en hacer sonar su posición (su búfer); el juego lo mide solo
     keys: dict = field(default_factory=dict)  # teclas cambiadas en Ajustes (acción -> tecla; ver inputs.ACTIONS)

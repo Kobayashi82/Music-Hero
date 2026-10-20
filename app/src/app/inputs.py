@@ -10,13 +10,15 @@ Teclado, con el juego activo (las teclas no llegan a la app que tenga el foco). 
     Espacio            menú (pausa)   Esc   volver (jugando: la pausa)   Retroceso   reiniciar la canción
     Tab                cambiar de dificultad sin parar la canción
     E                  activar el star power
+    flechas izquierda/derecha   retroceder / avanzar 5 s   Re Pág / Av Pág   subir / bajar el volumen
 En el buscador, letras, números y Espacio escriben y Retroceso borra (los trastes siguen en la guitarra).
 Siempre: Ctrl+Alt+H mostrar/ocultar (oculto = pausa y teclado libre), Ctrl+Alt+Q salir.
 Guitarra: + menú (pausa), − cambiar de dificultad, levantar el mástil activa el star power (acelerómetro del
 Wiimote, starpower.Tilt); en los menús, strum mover, verde o + elegir,
 rojo o − volver. Si la guitarra se apaga o se enciende más tarde, se reconecta sola.
 Wiimote (donde va enchufada la guitarra): A mostrar/ocultar, 1 canción siguiente, 2 anterior, Home al azar
-(siguiendo a AIMP, siguiente y anterior se las pide a AIMP).
+(siguiendo a AIMP, siguiente y anterior se las pide a AIMP); cruceta: izquierda/derecha retroceder/avanzar,
+arriba/abajo el volumen (siguiendo a AIMP, el de AIMP).
 """
 
 from __future__ import annotations
@@ -50,6 +52,10 @@ ACTIONS = [
     ("difficulty", N_("Cambiar de dificultad"), "tab", ("control", "difficulty")),
     ("star", N_("Star power"), "e", ("control", "star")),
     ("enter", N_("Elegir"), "enter", ("control", "enter")),
+    ("seek_back", N_("Retroceder 5 s"), "left", ("control", "seek_back")),
+    ("seek_fwd", N_("Avanzar 5 s"), "right", ("control", "seek_fwd")),
+    ("vol_up", N_("Subir el volumen"), "pageup", ("control", "vol_up")),
+    ("vol_down", N_("Bajar el volumen"), "pagedown", ("control", "vol_down")),
 ]
 GLOBAL_ACTIONS = ("toggle", "quit")
 DEFAULT_KEYS = {a: key for a, _, key, _ in ACTIONS}
@@ -58,7 +64,8 @@ ACTION_EVENTS = {a: ev for a, _, _, ev in ACTIONS}
 TEXT_CHARS = "abcdefghijklmnñopqrstuvwxyz0123456789 "
 BACKSPACE = "\b"  # en el buscador, Retroceso llega como InputEvent("char", BACKSPACE)
 # botones del propio Wiimote (los 2 bytes de botones de sus informes, wiibrew.org/wiki/Wiimote) -> control
-WIIMOTE_BUTTONS = {0x0008: "toggle", 0x0002: "next", 0x0001: "prev", 0x0080: "random"}  # A, 1, 2, Home
+WIIMOTE_BUTTONS = {0x0008: "toggle", 0x0002: "next", 0x0001: "prev", 0x0080: "random",  # A, 1, 2, Home
+                   0x0100: "seek_back", 0x0200: "seek_fwd", 0x0800: "vol_up", 0x0400: "vol_down"}  # cruceta
 
 
 def keymap(custom: dict[str, str] | None) -> dict[str, str]:

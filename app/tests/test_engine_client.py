@@ -81,3 +81,20 @@ def test_sin_motor_no_revienta(tmp_path):
     assert not c.available()
     c.add(["a.mp3"])
     assert not c.state.running and "no se puede lanzar" in c.state.error
+
+
+def test_cuenta_las_hechas_y_estima_lo_que_falta(tmp_path):
+    c = EngineClient(lambda: None, log=tmp_path / "engine.log")
+    feed = lambda now, *evs: ([c._events.put(e) for e in evs], c.poll(now))  # noqa: E731
+    feed(0, {"event": "queue", "pending": 3, "failed": 0, "paused": False, "current": None},
+         {"event": "start", "file": "a.mp3"})
+    assert c.state.eta_s is None  # aún no se sabe
+    feed(30, {"event": "progress", "file": "a.mp3", "done": 0.5, "step": "x"})
+    assert c.state.eta_s == 30 + 2 * 60  # la actual, por su avance: 60 s cada una
+    feed(40, {"event": "queue", "pending": 3, "failed": 0, "paused": True, "current": "a.mp3"})
+    feed(1000)  # en pausa (jugando) no cuenta
+    feed(1000, {"event": "queue", "pending": 3, "failed": 0, "paused": False, "current": "a.mp3"})
+    feed(1050, {"event": "done", "file": "a.mp3", "folder": "x", "skipped": False},
+         {"event": "queue", "pending": 2, "failed": 0, "paused": False, "current": None})
+    assert c.state.finished == 1 and c._durations == [90]
+    assert c.state.eta_s == 2 * 90

@@ -68,7 +68,11 @@ MENU_REPEAT_S = (0.35, 0.08, 0.035)  # strum mantenido en un menú: espera, repe
 SIDES = TrDict({"left": N_("Izquierda"), "right": N_("Derecha")})
 AIMP_CHECK_S = 0.3  # cada cuánto se mira qué canción tiene AIMP
 OWN_SEEK_S = 0.6  # los saltos que hace el propio juego en AIMP (reiniciar) no cuentan como saltos del usuario
+SETTLE_S = 0.08  # tras un salto en AIMP: se mira enseguida si es que ha cambiado de canción
 SONG_COMMANDS = ("next", "prev", "random")  # botones 1, 2 y Home del Wiimote
+TRANSPORT = ("seek_back", "seek_fwd", "vol_up", "vol_down")  # cruceta del Wiimote (y sus teclas)
+SEEK_MS = 5000
+VOLUME_STEP = 0.05
 PHRASE_FLASH_S = 0.6  # la barra de star power se enciende al completar una frase
 USAGE = N_("Music Hero: juega con la guitarra sobre la canción que suena.\n\n"
            "    play                      el selector de canciones\n"
@@ -101,6 +105,7 @@ class Session(QObject):
         self.waiting = ""  # siguiendo a AIMP, su canción no tiene chart: el aviso (y no se juega)
         self.aimp_check = 0.0
         self.own_seek_until = 0.0
+        self.settle_until = 0.0  # tras un salto de AIMP, hasta cuándo se mira si ha sido cambio de canción
         self.engine = engine or EngineClient()  # genera las charts en otro proceso (engine.py)
         self.installer = installer.EngineInstaller()  # la app instalada lo instala la primera vez que hace falta
         self.install_asked = False  # ya se ofreció instalarlo en esta sesión (no se insiste solo)
@@ -175,7 +180,8 @@ class Session(QObject):
 
     def new_game(self) -> None:
         notes = self.chart.difficulties[self.difficulty]
-        self.game = Game(notes, phrases=self.chart.star_power.get(self.difficulty) or self.phrases, beats=self.beat_times)
+        self.game = Game(notes, phrases=self.chart.star_power.get(self.difficulty) or self.phrases, beats=self.beat_times,
+                         anchor=self.cfg.anchoring)
         self.game.held |= {i for i, h in enumerate(self.held) if h}
         self.phrase_t = self.star_t = 0.0  # cuándo se completó la última frase y cuándo se activó
         self.star_hint = False  # ya se avisó de que se puede activar
@@ -266,6 +272,7 @@ class Session(QObject):
 
     def resync(self) -> None:
         """Partida nueva desde donde va la canción (las notas de antes no cuentan, ni la partida para récords)."""
+        self.player.take_seek()  # un salto de AIMP visto con el juego oculto ya no vale: se sigue desde aquí
         pos = self.player.position_ms()
         self.new_game()
         if pos > 0:
@@ -337,9 +344,8 @@ class Session(QObject):
             return
 
         def run() -> None:
-            raw = lambda t: player.position_ms(t) + player.offset_ms  # noqa: E731 - la posición de AIMP, tal cual
             try:
-                lag = loopback.measure(player.track.file, raw)
+                lag = loopback.measure(player.track.file, player.raw_ms)
             except Exception as err:  # noqa: BLE001 - sin loopback se sigue con el retardo guardado
                 print(t("medida del retardo de AIMP: {err}", err=err))
                 lag = None
@@ -521,13 +527,12 @@ class Session(QObject):
             return t("falta instalar el motor de generación")
         st = self.engine.state
         paused = " · " + t("en pausa mientras juegas") if st.paused else ""
+        left = t("hechas {done}, quedan {left}", done=st.finished, left=st.pending) + eta_text(st.eta_s)
         if st.current:
             line = t("generando «{name}» ({pct} %)", name=Path(st.current).stem, pct=round(st.done * 100))
-            if st.pending > 1:
-                line += " · " + t("{n} más en cola", n=st.pending - 1)
-            return line + paused
+            return line + " · " + left + paused
         if st.pending:
-            return t("{n} en cola", n=st.pending) + paused
+            return left + paused
         if self.missing and not self.cfg.background:
             return t("{n} sin chart (generar en segundo plano: no)", n=len(self.missing))
         return t("al día") if self.cfg.library_dirs else t("sin carpetas de música (Ajustes → Biblioteca)")
@@ -863,6 +868,10 @@ class Session(QObject):
 
     def game_settings_menu(self) -> Menu:
         cfg, num = self.cfg, self.num
+
+        def set_anchoring(v: bool) -> None:
+            cfg.anchoring = self.game.anchor = v
+            cfg.save()
         return Menu(t("Juego"), [
             Option(t("Dificultad por defecto"), value=lambda: DIFF_NAMES.get(cfg.difficulty, cfg.difficulty),
                    change=cycler(list(reversed(DIFFS)), lambda: cfg.difficulty,
@@ -872,8 +881,11 @@ class Session(QObject):
             Option(t("Letra"), value=lambda: yes_no(cfg.lyrics),
                    change=cycler([False, True], lambda: cfg.lyrics,
                                  lambda v: (setattr(cfg, "lyrics", v), cfg.save()))),
+            Option(t("Anclar trastes"), value=lambda: yes_no(cfg.anchoring),
+                   change=cycler([False, True], lambda: cfg.anchoring, set_anchoring)),
             Option(t("Volver"), self.menu_back, sep=True),
-        ])
+        ], body=t("Anclar trastes: en una nota suelta vale con que su traste sea el más alto pulsado (como en Guitar "
+                  "Hero). Si no, solo vale su traste."))
 
     def display_menu(self) -> Menu:
         cfg, num = self.cfg, self.num
@@ -898,7 +910,8 @@ class Session(QObject):
         cfg, num = self.cfg, self.num
         return Menu(t("Sonido y retardo"), [
             Option(t("Volumen"), value=lambda: pct(cfg.volume),
-                   change=num("volume", 0.1, 0.0, 1.0, lambda: setattr(self.player, "volume", cfg.volume))),
+                   change=num("volume", 0.1, 0.0, 1.0, lambda: isinstance(self.player, AimpPlayer)  # AIMP, el suyo
+                              or setattr(self.player, "volume", cfg.volume))),
             Option(t("Calibrar el retardo"), self.start_calibration, sep=True),
             Option(t("Retardo del audio"), value=lambda: f"{cfg.audio_offset_ms:+.0f} ms",
                    change=num("audio_offset_ms", 5, -300, 500, self.apply_offsets)),
@@ -921,9 +934,9 @@ class Session(QObject):
 
     def library_short(self) -> str:
         st = self.engine.state
-        if st.current:
-            return t("generando {pct} %", pct=round(st.done * 100))
-        return t("{n} en cola", n=st.pending) if st.pending else ""
+        if not st.pending:
+            return ""
+        return t("quedan {n}", n=st.pending) + eta_text(st.eta_s)
 
     def aimp_offset(self) -> float:
         """Siguiendo a AIMP: su búfer (medido con el loopback) más lo de los altavoces (la calibración)."""
@@ -1061,6 +1074,8 @@ class Session(QObject):
                 QGuiApplication.quit() if ev.value == "quit" else self.toggle_visible()
             elif ev.kind == "control" and ev.value in SONG_COMMANDS:
                 self.song_command(ev.value)
+            elif ev.kind == "control" and ev.value in TRANSPORT:
+                self.transport(ev.value)
             elif self.calib:
                 self.calib_input(ev)
             elif self.menus:
@@ -1118,6 +1133,8 @@ class Session(QObject):
                 return  # lo demás, ya con el juego a la vista
             elif ev.kind == "control" and ev.value in SONG_COMMANDS:
                 self.song_command(ev.value)
+            elif ev.kind == "control" and ev.value in TRANSPORT:
+                self.transport(ev.value)
         now = time.perf_counter()
         self.tick_library(now)
         if self.follow:
@@ -1143,6 +1160,40 @@ class Session(QObject):
         i = next((k for k, e in enumerate(songs) if e.sha == self.chart.audio_sha256), -1)
         if songs:
             self.choose(songs[(i + (1 if cmd == "next" else -1)) % len(songs)])
+
+    def transport(self, cmd: str) -> None:
+        """Cruceta del Wiimote: izquierda/derecha retroceder/avanzar, arriba/abajo el volumen."""
+        if cmd in ("vol_up", "vol_down"):
+            self.change_volume(VOLUME_STEP if cmd == "vol_up" else -VOLUME_STEP)
+        elif not (self.calib or self.blank or self.waiting or self.results):
+            self.seek_by(SEEK_MS if cmd == "seek_fwd" else -SEEK_MS)
+
+    def change_volume(self, step: float) -> None:
+        """Siguiendo a AIMP, el de AIMP; si no, el del juego (Ajustes → Sonido)."""
+        if isinstance(self.player, AimpPlayer):
+            v = max(0, min(100, round(self.player.volume * 100 + step * 100))) / 100
+            self.player.volume = v
+            self.toast(t("Volumen de AIMP: {v}", v=pct(v)))
+            return
+        self.cfg.volume = self.player.volume = max(0.0, min(1.0, round(self.cfg.volume + step, 2)))
+        self.cfg.save()
+        self.toast(t("Volumen: {v}", v=pct(self.cfg.volume)))
+
+    def seek_by(self, delta_ms: float) -> None:
+        """Retroceder o avanzar en la canción: partida nueva desde ahí (no cuenta para récords, salvo si se vuelve
+        al principio). En AIMP se le pide el salto y frame lo atiende al verlo (take_seek), como uno del usuario."""
+        p = self.player
+        raw = p.position_ms() + p.offset_ms  # la posición tal como la cuenta el reproductor
+        lo = -LEAD_IN_MS if p.lead_in else 0.0
+        target = max(lo, min(max(lo, p.duration_ms - 2000), raw + delta_ms))
+        p.seek(target)
+        if not isinstance(p, AimpPlayer):
+            pos = p.position_ms()
+            self.new_game()
+            if pos > 0:
+                self.game.skip_to(pos + SWITCH_AHEAD_MS)
+                self.partial = True
+        self.toast(f"{fmt_time(target)} / {fmt_time(p.duration_ms)}", 1.5)
 
     def calib_input(self, ev) -> None:
         if (ev.kind == "strum" and ev.down) or (ev.kind == "control" and ev.value == "enter"):
@@ -1240,13 +1291,18 @@ class Session(QObject):
         active = not self.waiting and not self.blank  # siguiendo a AIMP sin chart (o sin canciones) no se juega
         seek = self.player.take_seek()
         if seek is not None and active and now > self.own_seek_until:  # salto hecho en AIMP
+            # o cambio de canción: AIMP vuelve a 0 unos ms antes de decir cuál suena; mientras se mira, sin notas
+            # (si no, asomaría el principio de la anterior)
+            self.settle_until = now + SETTLE_S
+            self.aimp_check = min(self.aimp_check, self.settle_until)
             self.results = ""
             self.menus = [m for m in self.menus if m.key != "results"]
             self.new_game()
             self.game.skip_to(seek - self.player.offset_ms + SWITCH_AHEAD_MS)
             self.partial = True
+        settling = now < self.settle_until
         pos = self.player.position_ms(now)
-        if self.player.playing and active:
+        if self.player.playing and active and not settling:
             if self.autoplay:
                 self.play_itself(pos)
             self.game.update(pos)
@@ -1284,7 +1340,7 @@ class Session(QObject):
         lyrics = {}
         if self.calib:
             notes, beats = self.calib_notes(now, travel)
-        elif not active:
+        elif not active or settling:
             notes, beats = [], []
         else:
             notes, beats = self.song_notes(now, travel)
@@ -1428,6 +1484,19 @@ class Session(QObject):
 
 def pct(v: float) -> str:
     return f"{round(v * 100)} %"
+
+
+def eta_text(seconds: float | None) -> str:
+    """« · ~1 h 20 min» (vacío si aún no se sabe)."""
+    if seconds is None:
+        return ""
+    m = max(1, round(seconds / 60))
+    return f" · ~{m // 60} h {m % 60} min" if m >= 60 else f" · ~{m} min"
+
+
+def fmt_time(ms: float) -> str:
+    s = max(0, int(ms // 1000))
+    return f"{s // 60}:{s % 60:02d}"
 
 
 def yes_no(v: bool) -> str:
